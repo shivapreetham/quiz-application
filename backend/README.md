@@ -72,3 +72,22 @@ backend/
    node dist/index.js
    ```
    The server will start on port `3000` by default.
+
+4. **Development mode:**
+   ```sh
+   npm run dev
+   ```
+
+## 🔒 Configuration
+
+- Default admin password: `ADMIN_PASSWORD`
+- Server port: `3000`
+- Supports CORS for frontend connection
+
+## 🤝 Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+
+## 📝 License
+
+MIT

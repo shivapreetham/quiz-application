@@ -12,49 +12,13 @@ NIT Jamshedpur Quiz Portal is a modern, real-time quiz application built with a 
 - Admin panel for quiz creation, question management, and flow control
 - Connection status indicators for reliability
 
-## Check out some demo images of NIT Jamshedpur Quiz Portal in action:
-
-<div align="center">
-  <img src="images/image1.png" alt="NIT Jamshedpur Quiz Portal Home Screen" style="width:80%;" />
-  <br/>
-  <em>Home screen for Participants joining a quiz.</em>
-  <br><br>
-  <img src="images/image2.png" alt="Admin Login" style="width:80%;" />
-  <br/>
-  <em>Admin login screen for secure access to the admin panel.</em>
-  <br><br>
-  <img src="images/image3.png" alt="Quiz Room Management" style="width:80%;" />
-  <br/>
-  <em>Interface for creating and managing quiz rooms.</em>
-  <br><br>
-  <img src="images/image4.png" alt="Question Management" style="width:80%;" />
-  <br/>
-  <em>Admin panel for adding and editing quiz questions.</em>
-  <br><br>
-  <img src="images/image5.png" alt="Leaderboard" style="width:80%;" />
-  <br/>
-  <em>Quiz Control Panel for managing the quiz flow by the admin.</em>
-  <br><br>
-  <img src="images/image6.png" alt="Live Question Display" style="width:80%;" />
-  <br/>
-  <em>Live question display with timer and progress bar.</em>
-  <br><br>
-  <img src="images/image7.png" alt="Connection Status" style="width:80%;" />
-  <br/>
-  <em>Real-time leaderboard showing participant scores and rankings (User).</em>
-  <br/><br/>
-  <img src="images/image8.png" alt="Connection Status" style="width:80%;" />
-  <br/>
-  <em>Real-time leaderboard showing participant scores and rankings (Admin).</em>
-</div>
-
 ## 🚀 Quick Start
 
 ### 1. Clone the Repository
 
 ```sh
-git clone https://github.com/bPavan16/quizroom.git
-cd quizroom
+git clone <your-repository-url>
+cd Quizzer-MVI
 ```
 
 ### 2. Install Dependencies
@@ -123,10 +87,6 @@ Go to [http://localhost:5173](http://localhost:5173) in your browser.
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
-## 📄 License - MIT License
+## 📄 License
 
----
-
-<div align="center">
-Made with ❤️ by Pavan Bhakta
-</div>
+MIT License

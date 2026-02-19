@@ -67,9 +67,24 @@ frontend/
    ```
    The app will be available at [http://localhost:5173](http://localhost:5173)
 
+3. **Build for production:**
+   ```sh
+   npm run build
+   ```
+
+4. **Preview production build:**
+   ```sh
+   npm run preview
+   ```
+
+## 🔌 Backend Connection
+
+Make sure the backend server is running on `http://localhost:3000` before starting the frontend.
+
 ## 🤝 Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
 ## 📝 License
+
 MIT
