@@ -42,6 +42,33 @@ export class QuizManager {
         });
     }
 
+    public addProblems(roomId: string, problems: {
+        title: string;
+        description: string;
+        image?: string;
+        options: {
+            id: number;
+            title: string;
+        }[];
+        answer: AllowedSubmissions;
+    }[]) {
+        const quiz = this.getQuiz(roomId);
+        if (!quiz) {
+            return 0;
+        }
+        
+        problems.forEach(problem => {
+            quiz.addProblem({
+                ...problem,
+                id: (globalProblemId++).toString(),
+                startTime: new Date().getTime(),
+                submissions: []
+            });
+        });
+        
+        return problems.length;
+    }
+
     public next(roomId: string) {
         const quiz = this.getQuiz(roomId);
         if (!quiz) {

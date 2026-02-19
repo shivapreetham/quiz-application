@@ -25,6 +25,10 @@ export const Admin = () => {
   const [problemDescription, setProblemDescription] = useState('');
   const [options, setOptions] = useState(['', '', '', '']);
   const [correctAnswer, setCorrectAnswer] = useState<AllowedSubmissions>(0);
+  
+  // JSON import
+  const [jsonInput, setJsonInput] = useState('');
+  const [importStatus, setImportStatus] = useState('');
 
   // Listen for authentication events (always active)
   useEffect(() => {
@@ -63,6 +67,13 @@ export const Admin = () => {
         setTimeout(() => setSuccess(''), 3000);
       });
 
+      socket.on('problemsImported', (data) => {
+        setSuccess(`Successfully imported ${data.count} questions!`);
+        setJsonInput('');
+        setImportStatus('');
+        setTimeout(() => setSuccess(''), 3000);
+      });
+
       socket.on('quizStateUpdate', (data) => {
         setCurrentQuizState(data);
       });
@@ -75,6 +86,7 @@ export const Admin = () => {
       return () => {
         socket.off('quizCreated');
         socket.off('problemAdded');
+        socket.off('problemsImported');
         socket.off('quizStateUpdate');
         socket.off('error');
       };
@@ -146,6 +158,72 @@ export const Admin = () => {
     newOptions[index] = value;
     setOptions(newOptions);
   };
+
+  const handleImportJSON = () => {
+    try {
+      setImportStatus('Validating JSON...');
+      const parsed = JSON.parse(jsonInput);
+      
+      // Validate structure
+      if (!Array.isArray(parsed)) {
+        throw new Error('JSON must be an array of questions');
+      }
+      
+      // Validate each question
+      const validatedProblems = parsed.map((q, idx) => {
+        if (!q.title || typeof q.title !== 'string') {
+          throw new Error(`Question ${idx + 1}: Missing or invalid title`);
+        }
+        if (!q.description || typeof q.description !== 'string') {
+          throw new Error(`Question ${idx + 1}: Missing or invalid description`);
+        }
+        if (!Array.isArray(q.options) || q.options.length < 2) {
+          throw new Error(`Question ${idx + 1}: Must have at least 2 options`);
+        }
+        if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length) {
+          throw new Error(`Question ${idx + 1}: Invalid answer index`);
+        }
+        
+        return {
+          title: q.title.trim(),
+          description: q.description.trim(),
+          options: q.options.map((opt: string, i: number) => ({
+            id: i,
+            title: opt.trim()
+          })),
+          answer: q.answer
+        };
+      });
+      
+      setImportStatus(`Validated ${validatedProblems.length} questions. Importing...`);
+      
+      if (socket && roomId.trim()) {
+        socket.emit('importProblems', { 
+          roomId: roomId.trim(), 
+          problems: validatedProblems 
+        });
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Invalid JSON format');
+      setImportStatus('');
+      setTimeout(() => setError(''), 5000);
+    }
+  };
+
+  const sampleJSON = `[
+  {
+    "title": "What is the capital of France?",
+    "description": "Choose the correct capital city",
+    "options": ["London", "Paris", "Berlin", "Madrid"],
+    "answer": 1
+  },
+  {
+    "title": "What is 2 + 2?",
+    "description": "Basic arithmetic",
+    "options": ["3", "4", "5"],
+    "answer": 1
+  }
+]`;
 
   if (!isAuthenticated) {
     return (
@@ -221,9 +299,10 @@ export const Admin = () => {
         )}
 
         <Tabs defaultValue="quiz" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="quiz">Quiz Management</TabsTrigger>
             <TabsTrigger value="problems">Create Problems</TabsTrigger>
+            <TabsTrigger value="import">Import JSON</TabsTrigger>
             <TabsTrigger value="control">Quiz Control</TabsTrigger>
             <TabsTrigger value="monitor">Live Monitor</TabsTrigger>
           </TabsList>
@@ -356,6 +435,73 @@ export const Admin = () => {
                   >
                     Add Problem to Quiz
                   </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="import" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Import Questions from JSON</CardTitle>
+                <CardDescription>
+                  {roomId ? `Importing to room: ${roomId}` : 'Select a room ID first'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!roomId && (
+                  <Alert className="border-yellow-200 bg-yellow-50">
+                    <AlertDescription className="text-yellow-700">
+                      Please select or create a room first in the Quiz Management tab
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                <div className="space-y-2">
+                  <Label htmlFor="json-input">JSON Questions</Label>
+                  <textarea
+                    id="json-input"
+                    className="w-full h-64 p-3 border rounded-md font-mono text-sm"
+                    placeholder="Paste your JSON here..."
+                    value={jsonInput}
+                    onChange={(e) => setJsonInput(e.target.value)}
+                    disabled={!roomId}
+                  />
+                </div>
+
+                {importStatus && (
+                  <Alert className="border-blue-200 bg-blue-50">
+                    <AlertDescription className="text-blue-700">{importStatus}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleImportJSON}
+                    disabled={!roomId.trim() || !jsonInput.trim()}
+                    className="flex-1"
+                  >
+                    Import Questions
+                  </Button>
+                  <Button 
+                    onClick={() => setJsonInput(sampleJSON)}
+                    variant="outline"
+                  >
+                    Load Sample
+                  </Button>
+                </div>
+
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <h4 className="font-semibold mb-2">JSON Format Guide:</h4>
+                  <pre className="text-xs bg-white p-3 rounded border overflow-x-auto">
+                    {sampleJSON}
+                  </pre>
+                  <ul className="mt-3 text-sm space-y-1 text-gray-700">
+                    <li>• <strong>title</strong>: Question title (string)</li>
+                    <li>• <strong>description</strong>: Question description (string)</li>
+                    <li>• <strong>options</strong>: Array of answer choices (strings)</li>
+                    <li>• <strong>answer</strong>: Index of correct answer (0-based number)</li>
+                  </ul>
                 </div>
               </CardContent>
             </Card>

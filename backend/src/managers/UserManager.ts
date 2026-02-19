@@ -58,6 +58,15 @@ export class UserManager {
                 }
             });
 
+            socket.on("importProblems", data => {
+                try {
+                    const count = this.quizManager.addProblems(data.roomId, data.problems);
+                    socket.emit("problemsImported", { roomId: data.roomId, count });
+                } catch (error) {
+                    socket.emit("error", { message: "Failed to import problems" });
+                }
+            });
+
             socket.on("next", data => {
                 try {
                     this.quizManager.next(data.roomId);
