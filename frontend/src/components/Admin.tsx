@@ -219,6 +219,29 @@ export const Admin = () => {
     setOptions(newOptions);
   };
 
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    if (!file.name.endsWith('.json')) {
+      setError('Please select a JSON file');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setJsonInput(content);
+      setImportStatus(`Loaded ${file.name}`);
+    };
+    reader.onerror = () => {
+      setError('Failed to read file');
+      setTimeout(() => setError(''), 3000);
+    };
+    reader.readAsText(file);
+  };
+
   const handleImportJSON = () => {
     try {
       setImportStatus('Validating JSON...');
@@ -524,6 +547,30 @@ export const Admin = () => {
                     </AlertDescription>
                   </Alert>
                 )}
+                
+                <div className="space-y-2">
+                  <Label htmlFor="json-file">Upload JSON File</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="json-file"
+                      type="file"
+                      accept=".json"
+                      onChange={handleFileUpload}
+                      disabled={!roomId}
+                      className="flex-1"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">Select a .json file from your computer</p>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-muted-foreground">Or paste JSON</span>
+                  </div>
+                </div>
                 
                 <div className="space-y-2">
                   <Label htmlFor="json-input">JSON Questions</Label>
