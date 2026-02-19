@@ -424,7 +424,7 @@ export const Admin = () => {
                           {currentQuizState.type || 'Unknown'}
                         </Badge>
                       </div>
-                      {currentQuizState.problem && (
+                      {currentQuizState.type === 'question' && (
                         <>
                           <div className="flex justify-between">
                             <span className="font-medium">Current Problem:</span>
@@ -436,7 +436,7 @@ export const Admin = () => {
                           </div>
                         </>
                       )}
-                      {currentQuizState.leaderboard && (
+                      {(currentQuizState.type === 'leaderboard' || currentQuizState.type === 'ended') && (
                         <div className="flex justify-between">
                           <span className="font-medium">Players:</span>
                           <span>{currentQuizState.leaderboard.length}</span>
@@ -469,7 +469,7 @@ export const Admin = () => {
                   </Alert>
                 ) : currentQuizState ? (
                   <div className="space-y-4">
-                    {currentQuizState.type === 'question' && currentQuizState.problem && (
+                    {currentQuizState.type === 'question' && (
                       <div className="border rounded p-4 bg-blue-50">
                         <h3 className="font-semibold text-lg mb-2">Active Question</h3>
                         <p className="font-medium">{currentQuizState.problem.title}</p>
@@ -488,7 +488,7 @@ export const Admin = () => {
                       </div>
                     )}
 
-                    {currentQuizState.type === 'leaderboard' && currentQuizState.leaderboard && (
+                    {currentQuizState.type === 'leaderboard' && (
                       <div className="border rounded p-4 bg-green-50">
                         <h3 className="font-semibold text-lg mb-3">Current Leaderboard</h3>
                         <div className="space-y-2">

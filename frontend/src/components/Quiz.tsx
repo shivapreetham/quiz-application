@@ -81,10 +81,10 @@ export const Quiz = () => {
 
             return () => clearInterval(timer);
         }
-    }, [quizState?.type, quizState?.problem?.id]); // Only re-run when question changes
+    }, [quizState?.type, quizState?.type === 'question' ? quizState?.problem?.id : null]); // Only re-run when question changes
 
     const handleSubmit = () => {
-        if (selectedOption !== null && quizState?.problem && roomId && !hasSubmitted) {
+        if (selectedOption !== null && quizState?.type === 'question' && roomId && !hasSubmitted) {
             const currentProblem = quizState.problem;
             submitAnswer(roomId, currentProblem.id, selectedOption);
             setHasSubmitted(true);
@@ -202,7 +202,7 @@ export const Quiz = () => {
         );
     }
 
-    if (quizState.type === 'question' && quizState.problem) {
+    if (quizState.type === 'question') {
         const currentProblem = quizState.problem;
         const progress = ((20 - timeLeft) / 20) * 100;
 
@@ -334,7 +334,8 @@ export const Quiz = () => {
         );
     }
 
-    // Fallback for unknown state
+    // TypeScript ensures all cases are handled, this is unreachable
+    // But keeping for safety at runtime
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
             <Card className="w-full max-w-2xl">
@@ -344,11 +345,15 @@ export const Quiz = () => {
                 </CardHeader>
                 <CardContent className="text-center">
                     <p className="text-gray-600">
-                        Current state: {quizState.type || 'undefined'}
+                        An unexpected state was encountered. Please refresh the page.
                     </p>
-                    <p className="text-sm text-gray-500 mt-2">
-                        Please contact the admin if this persists.
-                    </p>
+                    <Button
+                        onClick={() => window.location.reload()}
+                        variant="outline"
+                        className="mt-4"
+                    >
+                        Refresh
+                    </Button>
                 </CardContent>
             </Card>
         </div>
