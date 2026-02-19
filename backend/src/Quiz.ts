@@ -12,6 +12,8 @@ export class Quiz {
     private activeProblem: number;
     private users: User[];
     private currentState: "leaderboard" | "question" | "not_started" | "ended";
+    private leaderboardTimer: NodeJS.Timeout | null = null;
+    private hasEnded: boolean = false;
 
 
     /* 
@@ -74,6 +76,16 @@ export class Quiz {
     */
 
     start() {
+        if (this.hasStarted) {
+            console.log("Quiz already started");
+            return;
+        }
+        if (this.problems.length === 0) {
+            throw new Error("Cannot start quiz: No problems added");
+        }
+        if (this.hasEnded) {
+            throw new Error("Cannot start quiz: Quiz has ended");
+        }
         this.hasStarted = true;
         this.setActiveProblem(this.problems[0]);
     }
@@ -87,15 +99,23 @@ export class Quiz {
 
     setActiveProblem(problem: Problem) {
         console.log("set active problem")
+        // Clear any existing timer to prevent race conditions
+        if (this.leaderboardTimer) {
+            clearTimeout(this.leaderboardTimer);
+            this.leaderboardTimer = null;
+        }
+        
         this.currentState = "question"
         problem.startTime = new Date().getTime();
         problem.submissions = [];
         IoManager.getIo().to(this.roomId).emit("problem", {
             problem
         })
-        // Todo: clear this if function moves ahead
-        setTimeout(() => {
+        
+        // Set new timer for leaderboard
+        this.leaderboardTimer = setTimeout(() => {
             this.sendLeaderboard();
+            this.leaderboardTimer = null;
         }, PROBLEM_TIME_S * 1000);
     }
 
@@ -123,17 +143,54 @@ export class Quiz {
     */
 
     next() {
+        if (!this.hasStarted) {
+            throw new Error("Cannot move to next: Quiz not started");
+        }
+        if (this.hasEnded) {
+            console.log("Quiz has already ended");
+            return;
+        }
+        
+        // Clear the current timer before moving to next
+        if (this.leaderboardTimer) {
+            clearTimeout(this.leaderboardTimer);
+            this.leaderboardTimer = null;
+        }
+        
         this.activeProblem++;
         const problem = this.problems[this.activeProblem];
         if (problem) {
             this.setActiveProblem(problem);
         } else {
             this.activeProblem--;
-            // send final results here
-            // IoManager.getIo().emit("QUIZ_END", {
-            //     problem
-            // })
+            this.endQuiz();
         }
+    }
+
+    /*
+    Ends the quiz and sends final results.
+
+    @returns {void}
+    */
+    endQuiz() {
+        if (this.hasEnded) {
+            return;
+        }
+        
+        console.log("Ending quiz");
+        this.hasEnded = true;
+        this.currentState = "ended";
+        
+        // Clear any pending timers
+        if (this.leaderboardTimer) {
+            clearTimeout(this.leaderboardTimer);
+            this.leaderboardTimer = null;
+        }
+        
+        const leaderboard = this.getLeaderboard();
+        IoManager.getIo().to(this.roomId).emit("quiz_ended", {
+            leaderboard
+        });
     }
 
     /*
@@ -183,27 +240,49 @@ export class Quiz {
     submit(userId: string, roomId: string, problemId: string, submission: AllowedSubmissions) {
         console.log("userId");
         console.log(userId);
+        
+        if (!this.hasStarted) {
+            console.log("Cannot submit: Quiz not started");
+            return false;
+        }
+        
+        if (this.hasEnded) {
+            console.log("Cannot submit: Quiz has ended");
+            return false;
+        }
+        
         const problem = this.problems.find(x => x.id == problemId);
         const user = this.users.find(x => x.id === userId);
 
         if (!problem || !user) {
             console.log("problem or user not found")
-            return;
+            return false;
         }
+        
         const existingSubmission = problem.submissions.find(x => x.userId === userId);
 
         if (existingSubmission) {
-            console.log("existn submissions")
-            return;
+            console.log("existing submission found")
+            return false;
         }
+        
+        const isCorrect = problem.answer === submission;
 
         problem.submissions.push({
             problemId,
             userId,
-            isCorrect: problem.answer === submission,
+            isCorrect,
             optionSelected: submission
         });
-        user.points += (1000 - (500 * (new Date().getTime() - problem.startTime) / (PROBLEM_TIME_S * 1000)));
+        
+        // Only award points if answer is correct
+        if (isCorrect) {
+            const timeTaken = new Date().getTime() - problem.startTime;
+            const timeBonus = Math.max(0, 1000 - (500 * timeTaken / (PROBLEM_TIME_S * 1000)));
+            user.points += Math.floor(timeBonus);
+        }
+        
+        return true;
     }
 
     /*

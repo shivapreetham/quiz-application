@@ -52,6 +52,13 @@ export const Admin = () => {
   // Listen for admin events (only when authenticated)
   useEffect(() => {
     if (socket && isAuthenticated) {
+      // Load existing quizzes on authentication
+      socket.emit('getAllQuizzes');
+      
+      socket.on('quizzesList', (data) => {
+        setActiveQuizzes(data.quizzes.map((q: { roomId: string }) => q.roomId));
+      });
+      
       socket.on('quizCreated', (data) => {
         setSuccess(`Quiz room "${data.roomId}" created successfully!`);
         setActiveQuizzes(prev => [...prev, data.roomId]);
@@ -84,6 +91,7 @@ export const Admin = () => {
       });
 
       return () => {
+        socket.off('quizzesList');
         socket.off('quizCreated');
         socket.off('problemAdded');
         socket.off('problemsImported');

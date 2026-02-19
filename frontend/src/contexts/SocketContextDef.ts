@@ -9,6 +9,7 @@ export interface SocketContextType {
   userId: string | null;
   currentRoomId: string | null;
   isConnected: boolean;
+  connectionError: string | null;
   joinRoom: (roomId: string, userName: string) => void;
   leaveRoom: () => void;
   submitAnswer: (roomId: string, problemId: string, optionSelected: AllowedSubmissions) => void;
