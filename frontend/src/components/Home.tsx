@@ -24,7 +24,7 @@ export const Home = () => {
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
             <Card className="w-full max-w-md">
                 <CardHeader className="text-center">
-                    <CardTitle className="text-2xl font-bold text-gray-800">NIT Jamshedpur Quiz Portal</CardTitle>
+                    <CardTitle className="text-2xl font-bold text-gray-800">Quiz Portal - NITJSR</CardTitle>
                     <CardDescription>
                         Join an existing quiz or create a new one
                     </CardDescription>

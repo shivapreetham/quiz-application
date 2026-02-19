@@ -198,7 +198,7 @@ export const Admin = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${roomId}-leaderboard-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `${roomId}-leaderboard-nitjsr-${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -290,7 +290,7 @@ export const Admin = () => {
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold text-gray-800">Admin Login</CardTitle>
+            <CardTitle className="text-2xl font-bold text-gray-800">Admin Login - NITJSR</CardTitle>
             <CardDescription>
               Enter admin password to access quiz management
             </CardDescription>
@@ -337,7 +337,7 @@ export const Admin = () => {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              Quiz Admin Panel
+              Quiz Admin Panel - NITJSR
               <Badge variant={isConnected ? "default" : "destructive"}>
                 {isConnected ? 'Connected' : 'Disconnected'}
               </Badge>
