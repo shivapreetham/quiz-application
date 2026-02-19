@@ -91,6 +91,32 @@ export const Quiz = () => {
         }
     };
 
+    const handleDownloadLeaderboard = () => {
+        if (!quizState || (quizState.type !== 'leaderboard' && quizState.type !== 'ended')) {
+            return;
+        }
+        
+        const leaderboard = quizState.leaderboard;
+        const csvContent = [
+            ['Rank', 'Name', 'Points'],
+            ...leaderboard.map((user, index) => [
+                index + 1,
+                user.name,
+                Math.floor(user.points)
+            ])
+        ].map(row => row.join(',')).join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `leaderboard-${roomId}-${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     if (!quizState) {
         if (connectionTimeout) {
             return (
@@ -293,6 +319,12 @@ export const Quiz = () => {
                                     </div>
                                 ))}
                         </div>
+                        <Button
+                            onClick={handleDownloadLeaderboard}
+                            className="w-full mt-4 bg-green-600 hover:bg-green-700"
+                        >
+                            📥 Download Results (CSV)
+                        </Button>
                     </CardContent>
                 </Card>
             </div>
@@ -324,10 +356,17 @@ export const Quiz = () => {
                                             </Badge>
                                             <span className="font-medium">{user.name}</span>
                                         </div>
-                                        <span className="font-bold text-lg">{user.points}</span>
+                                        <span className="font-bold text-lg">{Math.floor(user.points)}</span>
                                     </div>
                                 ))}
                         </div>
+                        <Button
+                            onClick={handleDownloadLeaderboard}
+                            className="w-full mt-4 bg-green-600 hover:bg-green-700"
+                        >
+                            📥 Download Final Results (CSV)
+                        </Button>
+
                     </CardContent>
                 </Card>
             </div>

@@ -30,6 +30,21 @@ export const Admin = () => {
   const [jsonInput, setJsonInput] = useState('');
   const [importStatus, setImportStatus] = useState('');
 
+  // Auto-refresh quiz state when room is selected
+  useEffect(() => {
+    if (socket && roomId.trim() && isAuthenticated) {
+      // Fetch initial state
+      socket.emit('getQuizState', { roomId: roomId.trim() });
+      
+      // Set up auto-refresh every 3 seconds
+      const interval = setInterval(() => {
+        socket.emit('getQuizState', { roomId: roomId.trim() });
+      }, 3000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [socket, roomId, isAuthenticated]);
+
   // Listen for authentication events (always active)
   useEffect(() => {
     if (socket) {
@@ -159,6 +174,43 @@ export const Admin = () => {
     if (socket && roomId.trim()) {
       socket.emit('getQuizState', { roomId: roomId.trim() });
     }
+  };
+
+  const handleDownloadLeaderboard = () => {
+    if (!currentQuizState || 
+        (currentQuizState.type !== 'leaderboard' && currentQuizState.type !== 'ended')) {
+      setError('No leaderboard data available to download');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+    
+    const leaderboard = currentQuizState.leaderboard;
+    const csvContent = [
+      ['Rank', 'Name', 'Points'],
+      ...leaderboard.map((user, index) => [
+        index + 1,
+        user.name,
+        Math.floor(user.points)
+      ])
+    ].map(row => row.join(',')).join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${roomId}-leaderboard-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    setSuccess('Leaderboard downloaded successfully!');
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
+  const handleSelectRoom = (quiz: string) => {
+    setRoomId(quiz);
+    setCurrentQuizState(null); // Clear old state
   };
 
   const updateOption = (index: number, value: string) => {
@@ -305,6 +357,14 @@ export const Admin = () => {
             <AlertDescription className="text-green-700">{success}</AlertDescription>
           </Alert>
         )}
+        
+        <Alert className="mb-4 border-blue-200 bg-blue-50">
+          <AlertDescription className="text-blue-700">
+            <strong>ℹ️ Important:</strong> Quiz data is stored in-memory on the backend server. 
+            All quizzes and data will be lost when the server restarts. Make sure to download 
+            leaderboards before closing quizzes!
+          </AlertDescription>
+        </Alert>
 
         <Tabs defaultValue="quiz" className="w-full">
           <TabsList className="grid w-full grid-cols-5">
@@ -358,7 +418,7 @@ export const Admin = () => {
                           <Button 
                             size="sm" 
                             variant="outline"
-                            onClick={() => setRoomId(quiz)}
+                            onClick={() => handleSelectRoom(quiz)}
                           >
                             Select
                           </Button>
@@ -562,6 +622,16 @@ export const Admin = () => {
                   >
                     Refresh Quiz State
                   </Button>
+                  
+                  {currentQuizState && (currentQuizState.type === 'leaderboard' || currentQuizState.type === 'ended') && (
+                    <Button 
+                      onClick={handleDownloadLeaderboard}
+                      variant="default"
+                      className="w-full bg-green-600 hover:bg-green-700"
+                    >
+                      📥 Download Leaderboard (CSV)
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
 
