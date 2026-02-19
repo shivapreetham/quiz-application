@@ -1,0 +1,62 @@
+[
+  {
+    "title": "What is the capital of France?",
+    "description": "Choose the correct capital city",
+    "options": ["London", "Paris", "Berlin", "Madrid"],
+    "answer": 1
+  },
+  {
+    "title": "What is 2 + 2?",
+    "description": "Basic arithmetic",
+    "options": ["3", "4", "5"],
+    "answer": 1
+  },
+  {
+    "title": "Which planet is known as the Red Planet?",
+    "description": "Solar system knowledge",
+    "options": ["Venus", "Mars", "Jupiter", "Saturn"],
+    "answer": 1
+  },
+  {
+    "title": "Who wrote 'Romeo and Juliet'?",
+    "description": "English literature",
+    "options": ["Charles Dickens", "William Shakespeare", "Jane Austen", "Mark Twain"],
+    "answer": 1
+  },
+  {
+    "title": "What is the largest ocean on Earth?",
+    "description": "Geography question",
+    "options": ["Atlantic Ocean", "Indian Ocean", "Arctic Ocean", "Pacific Ocean"],
+    "answer": 3
+  },
+  {
+    "title": "In which year did India gain independence?",
+    "description": "Indian history",
+    "options": ["1942", "1945", "1947", "1950"],
+    "answer": 2
+  },
+  {
+    "title": "What is the chemical symbol for Gold?",
+    "description": "Chemistry basics",
+    "options": ["Go", "Gd", "Au", "Ag"],
+    "answer": 2
+  },
+  {
+    "title": "Which programming language is known as the 'mother of all languages'?",
+    "description": "Computer science trivia",
+    "options": ["C", "Assembly", "FORTRAN", "COBOL"],
+    "answer": 0
+  },
+  {
+    "title": "What is the speed of light in vacuum?",
+    "description": "Physics constant",
+    "options": ["3 × 10^8 m/s", "2 × 10^8 m/s", "4 × 10^8 m/s", "5 × 10^8 m/s"],
+    "answer": 0
+  },
+  {
+    "title": "Which data structure uses LIFO principle?",
+    "description": "Data structures",
+    "options": ["Queue", "Stack", "Tree", "Graph"],
+    "answer": 1
+  }
+]
