@@ -298,6 +298,7 @@ export const Quiz = () => {
                 <Card className="w-full max-w-2xl">
                     <CardHeader className="text-center">
                         <CardTitle>Leaderboard</CardTitle>
+                        <CardDescription>Each correct answer: 500-1000 points (faster = more points)</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
@@ -315,7 +316,7 @@ export const Quiz = () => {
                                             </Badge>
                                             <span className="font-medium">{user.name}</span>
                                         </div>
-                                        <span className="font-bold text-lg">{user.points}</span>
+                                        <span className="font-bold text-lg">{Math.floor(user.points)} pts</span>
                                     </div>
                                 ))}
                         </div>
@@ -337,7 +338,7 @@ export const Quiz = () => {
                 <Card className="w-full max-w-2xl">
                     <CardHeader className="text-center">
                         <CardTitle>Quiz Ended</CardTitle>
-                        <CardDescription>Thank you for participating!</CardDescription>
+                        <CardDescription>Thank you for participating! Scoring: 500-1000 pts per correct answer</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
@@ -356,7 +357,7 @@ export const Quiz = () => {
                                             </Badge>
                                             <span className="font-medium">{user.name}</span>
                                         </div>
-                                        <span className="font-bold text-lg">{Math.floor(user.points)}</span>
+                                        <span className="font-bold text-lg">{Math.floor(user.points)} pts</span>
                                     </div>
                                 ))}
                         </div>

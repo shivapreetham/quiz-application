@@ -556,7 +556,6 @@ export const Admin = () => {
                       type="file"
                       accept=".json"
                       onChange={handleFileUpload}
-                      disabled={!roomId}
                       className="flex-1"
                     />
                   </div>
@@ -580,8 +579,8 @@ export const Admin = () => {
                     placeholder="Paste your JSON here..."
                     value={jsonInput}
                     onChange={(e) => setJsonInput(e.target.value)}
-                    disabled={!roomId}
                   />
+                  <p className="text-xs text-gray-500">You can paste or edit JSON directly here</p>
                 </div>
 
                 {importStatus && (
@@ -761,7 +760,8 @@ export const Admin = () => {
 
                     {currentQuizState.type === 'leaderboard' && (
                       <div className="border rounded p-4 bg-green-50">
-                        <h3 className="font-semibold text-lg mb-3">Current Leaderboard</h3>
+                        <h3 className="font-semibold text-lg mb-2">Current Leaderboard</h3>
+                        <p className="text-xs text-gray-600 mb-3">Scoring: 500-1000 points per correct answer (faster = more points)</p>
                         <div className="space-y-2">
                           {currentQuizState.leaderboard
                             .sort((a: User, b: User) => b.points - a.points)
@@ -773,7 +773,7 @@ export const Admin = () => {
                                 </Badge>
                                 <span className="font-medium">{player.name}</span>
                               </div>
-                              <span className="font-bold">{player.points} pts</span>
+                              <span className="font-bold">{Math.floor(player.points)} pts</span>
                             </div>
                           ))}
                         </div>
