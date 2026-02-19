@@ -1,0 +1,20 @@
+{
+  "name": "nit-jamshedpur-quiz-portal-backend",
+  "version": "1.0.0",
+  "description": "Backend server for NIT Jamshedpur Quiz Portal",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "socket.io": "^4.8.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
