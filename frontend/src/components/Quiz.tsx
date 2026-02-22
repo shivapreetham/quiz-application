@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -324,7 +324,7 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
       setTimeLeft(remaining);
       if (remaining === 0) {
         clearInterval(interval);
-        handleFinish(true);
+        handleFinish();
       }
     }, 500);
     return () => clearInterval(interval);
@@ -348,7 +348,7 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
     }
   }, [activeIdx]);
 
-  const handleFinish = (forced = false) => {
+  const handleFinish = () => {
     if (finished) return;
     const currentProblem = problems[activeIdx];
     if (currentProblem) {
