@@ -24,11 +24,12 @@ function Navigation() {
   };
 
   return (
-    <div className="fixed top-4 right-4 z-50 flex gap-2">
+    <div className="fixed top-2 sm:top-4 right-2 sm:right-4 z-50 flex flex-col sm:flex-row gap-2">
       {!isAdminRoute && (
         <Button 
           variant="outline" 
           onClick={() => navigate('/admin')}
+          className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2"
         >
           Admin Mode
         </Button>
@@ -38,6 +39,7 @@ function Navigation() {
         <Button 
           variant="outline" 
           onClick={() => navigate('/')}
+          className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2"
         >
           Switch to User Mode
         </Button>
@@ -47,6 +49,7 @@ function Navigation() {
         <Button 
           variant="outline" 
           onClick={handleGoHome}
+          className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2"
         >
           Home
         </Button>
