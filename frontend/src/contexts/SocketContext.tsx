@@ -1,289 +1,180 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type {
-  AllowedSubmissions,
-  ProblemInput,
-  Problem,
-  QuizConfig,
-  QuizSummary,
-  SocketQuizState,
-} from '../types/types';
+import type { User, AllowedSubmissions, SocketQuizState } from '../types/types';
 import { SocketContext } from './SocketContextDef';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
 export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [quizState, setQuizState] = useState<SocketQuizState | null>(null);
+  const [user] = useState<User | null>(null);
+  const [userId, setUserId] = useState<string | null>(() => {
+    // Persist userId in localStorage
+    return localStorage.getItem('quizUserId');
+  });
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(() => {
+    // Persist roomId in localStorage
+    return localStorage.getItem('quizRoomId');
+  });
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // User state
-  const [quizState, setQuizState] = useState<SocketQuizState | null>(null);
-  const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('quiz_userId'));
-  const [currentRoomId, setCurrentRoomId] = useState<string | null>(() => localStorage.getItem('quiz_roomId'));
-
-  // Admin state
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [quizSummaries, setQuizSummaries] = useState<QuizSummary[]>([]);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-  const [problems, setProblems] = useState<Problem[]>([]);
-  const [currentQuizState, setCurrentQuizState] = useState<SocketQuizState | null>(null);
-  const [currentQuizConfig, setCurrentQuizConfig] = useState<QuizConfig | null>(null);
-
-  const socketRef = useRef<Socket | null>(null);
-  const selectedRoomIdRef = useRef<string | null>(null);
-  const userIdRef = useRef<string | null>(userId);
-
-  useEffect(() => { userIdRef.current = userId; }, [userId]);
-  useEffect(() => { selectedRoomIdRef.current = selectedRoomId; }, [selectedRoomId]);
-
-  // ── Socket lifecycle ──────────────────────────────────────────────────────
-
   useEffect(() => {
-    const s = io(BACKEND_URL, {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+    const newSocket = io(backendUrl, {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 5
     });
+    setSocket(newSocket);
 
-    socketRef.current = s;
-    setSocket(s);
-
-    s.on('connect', () => {
+    newSocket.on('connect', () => {
+      console.log('Connected to server');
       setIsConnected(true);
       setConnectionError(null);
-      const savedRoom = localStorage.getItem('quiz_roomId');
-      const savedName = localStorage.getItem('quiz_userName');
-      if (savedRoom && savedName) s.emit('join', { roomId: savedRoom, name: savedName });
+      
+      // Rejoin room if we were in one
+      const savedRoomId = localStorage.getItem('quizRoomId');
+      const savedUserName = localStorage.getItem('quizUserName');
+      if (savedRoomId && savedUserName) {
+        console.log('Rejoining room:', savedRoomId);
+        newSocket.emit('join', { roomId: savedRoomId, name: savedUserName });
+      }
     });
 
-    s.on('disconnect', () => {
+    newSocket.on('disconnect', () => {
+      console.log('Disconnected from server');
       setIsConnected(false);
-      setConnectionError('Connection lost. Reconnecting...');
+      setConnectionError('Connection lost. Attempting to reconnect...');
+    });
+    
+    newSocket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+      setConnectionError('Failed to connect to server');
     });
 
-    s.on('connect_error', () => setConnectionError('Failed to connect to server'));
-
-    // ── User events ──
-    s.on('init', (data: { userId: string | null; state: SocketQuizState }) => {
-      if (data.userId && data.state?.type !== 'room_not_found') {
+    // Listen for initial state when joining
+    newSocket.on('init', (data) => {
+      console.log('Received init:', data);
+      if (data.userId && data.state !== null) {
         setUserId(data.userId);
-        userIdRef.current = data.userId;
-        localStorage.setItem('quiz_userId', data.userId);
+        localStorage.setItem('quizUserId', data.userId);
         setQuizState(data.state);
       } else {
+        // Room doesn't exist or couldn't join
         setQuizState({ type: 'room_not_found' });
-        clearUserStorage();
+        // Clear saved data
+        localStorage.removeItem('quizUserId');
+        localStorage.removeItem('quizRoomId');
+        localStorage.removeItem('quizUserName');
       }
     });
 
-    s.on('stateUpdate', (state: SocketQuizState) => setQuizState(state));
-    s.on('submissionSuccess', () => {});
-    s.on('submissionFailed', (d: { message: string }) => console.warn('[submitAnswer] failed:', d.message));
-    s.on('bulkSubmitSuccess', () => {});
-    s.on('bulkSubmitFailed', (d: { message: string }) => console.warn('[bulkSubmit] failed:', d.message));
-
-    // ── Admin events ──
-    s.on('adminAuth', (data: { success: boolean }) => {
-      setIsAuthenticated(data.success);
-      if (data.success) s.emit('getAllQuizzes');
+    // Listen for problem updates
+    newSocket.on('problem', (data) => {
+      console.log('Received problem:', data);
+      setQuizState({
+        type: 'question',
+        problem: data.problem
+      });
     });
 
-    s.on('quizzesList', (data: { quizzes: QuizSummary[] }) => {
-      setQuizSummaries(data.quizzes);
-      // Update current quiz config if room is selected
-      const selectedId = selectedRoomIdRef.current;
-      if (selectedId) {
-        const quiz = data.quizzes.find((q) => q.roomId === selectedId);
-        if (quiz) {
-          setCurrentQuizConfig(quiz.config);
-        }
-      }
+    // Listen for leaderboard updates
+    newSocket.on('leaderboard', (data) => {
+      console.log('Received leaderboard:', data);
+      setQuizState({
+        type: 'leaderboard',
+        leaderboard: data.leaderboard
+      });
     });
-    s.on('quizCreated',   () => s.emit('getAllQuizzes'));
-    s.on('quizStarted',   () => s.emit('getAllQuizzes'));
-    s.on('quizScheduled', () => s.emit('getAllQuizzes'));
+    
+    // Listen for quiz ended
+    newSocket.on('quiz_ended', (data) => {
+      console.log('Quiz ended:', data);
+      setQuizState({
+        type: 'ended',
+        leaderboard: data.leaderboard
+      });
+    });
+    
+    // Listen for submission feedback
+    newSocket.on('submissionSuccess', () => {
+      console.log('Submission successful');
+    });
+    
+    newSocket.on('submissionFailed', (data) => {
+      console.error('Submission failed:', data.message);
+    });
 
-    const updateProblems = (data: { problems?: Problem[]; roomId?: string }) => {
-      // Handle both { problems } and { roomId, problem, problems } formats
-      if (data?.problems && Array.isArray(data.problems)) {
-        // Only update if this is for the currently selected room
-        if (!data.roomId || data.roomId === selectedRoomIdRef.current) {
-          setProblems(data.problems);
-        }
-      }
+    return () => {
+      newSocket.close();
     };
-    s.on('problemAdded',      updateProblems);
-    s.on('problemUpdated',    updateProblems);
-    s.on('problemDeleted',    updateProblems);
-    s.on('problemsReordered', updateProblems);
-    s.on('problemsImported',  updateProblems);
-    s.on('quizProblems',      updateProblems);
-
-    s.on('quizStateUpdate', (state: SocketQuizState) => setCurrentQuizState(state));
-    s.on('allSubmissionsForExport', (data: { submissions: any[]; problems: any[] }) => {
-      // Store export data temporarily - components can access via callback
-      (window as any).quizExportData = data;
-    });
-    s.on('error', (data: { event: string; message: string }) => {
-      console.error('[server error]', data.event, data.message);
-    });
-
-    return () => { s.close(); };
   }, []);
 
-  // ── User actions ──────────────────────────────────────────────────────────
-
-  const joinRoom = useCallback((roomId: string, userName: string) => {
-    socketRef.current?.emit('join', { roomId: roomId.trim(), name: userName.trim() });
-    setCurrentRoomId(roomId);
-    localStorage.setItem('quiz_roomId', roomId.trim());
-    localStorage.setItem('quiz_userName', userName.trim());
-  }, []);
-
-  const leaveRoom = useCallback(() => {
-    setCurrentRoomId(null);
-    setUserId(null);
-    setQuizState(null);
-    clearUserStorage();
-  }, []);
-
-  /** per_question: submit an answer (or null to skip) */
-  const submitAnswer = useCallback(
-    (roomId: string, problemId: string, optionSelected: AllowedSubmissions | null) => {
-      const uid = userIdRef.current;
-      if (!uid) return;
-      socketRef.current?.emit('submitAnswer', { roomId, problemId, userId: uid, optionSelected });
-    },
-    [],
-  );
-
-  /** total mode: finish quiz with all answers */
-  const bulkSubmit = useCallback(
-    (roomId: string, answers: { problemId: string; optionSelected: AllowedSubmissions; timeTaken?: number }[]) => {
-      const uid = userIdRef.current;
-      if (!uid) return;
-      socketRef.current?.emit('bulkSubmit', { roomId, userId: uid, answers });
-    },
-    [],
-  );
-
-  // ── Admin actions ─────────────────────────────────────────────────────────
-
-  const login = useCallback((password: string) => {
-    socketRef.current?.emit('joinAdmin', { password });
-  }, []);
-
-  const selectRoom = useCallback((roomId: string) => {
-    selectedRoomIdRef.current = roomId;
-    setSelectedRoomId(roomId);
-    setProblems([]);
-    // Find the quiz config from summaries
-    const quiz = quizSummaries.find((q) => q.roomId === roomId);
-    if (quiz) {
-      setCurrentQuizConfig(quiz.config);
+  const joinRoom = (roomId: string, userName: string) => {
+    if (socket && roomId && userName) {
+      console.log('Joining room:', roomId, 'as', userName);
+      socket.emit('join', { roomId: roomId.trim(), name: userName.trim() });
+      setCurrentRoomId(roomId);
+      // Persist for reconnection
+      localStorage.setItem('quizRoomId', roomId.trim());
+      localStorage.setItem('quizUserName', userName.trim());
     }
-    socketRef.current?.emit('getQuizProblems', { roomId });
-    socketRef.current?.emit('getQuizState', { roomId });
-  }, [quizSummaries]);
+  };
 
-  const createQuiz = useCallback((roomId: string, config: QuizConfig) => {
-    socketRef.current?.emit('createQuiz', { roomId, config });
-    // Store config immediately for the newly created quiz
-    setCurrentQuizConfig(config);
-  }, []);
+  const createRoom = (userName: string) => {
+    // Generate a random room ID for the user
+    const roomId = Math.random().toString(36).substring(2, 15);
+    if (socket && userName) {
+      console.log('Creating/joining room:', roomId);
+      socket.emit('join', { roomId, name: userName.trim() });
+      setCurrentRoomId(roomId);
+      // Persist for reconnection
+      localStorage.setItem('quizRoomId', roomId);
+      localStorage.setItem('quizUserName', userName.trim());
+    }
+  };
 
-  const addProblem = useCallback((problem: ProblemInput) => {
-    const roomId = selectedRoomIdRef.current;
-    if (!roomId) { console.error('[addProblem] no room selected'); return; }
-    socketRef.current?.emit('addProblem', { roomId, problem });
-  }, []);
+  const leaveRoom = () => {
+    if (socket && currentRoomId) {
+      console.log('Leaving room:', currentRoomId);
+      socket.emit('leave', { roomId: currentRoomId });
+      setCurrentRoomId(null);
+      setUserId(null);
+      setQuizState(null);
+      // Clear persisted data
+      localStorage.removeItem('quizRoomId');
+      localStorage.removeItem('quizUserId');
+      localStorage.removeItem('quizUserName');
+    }
+  };
 
-  const updateProblem = useCallback((problemId: string, update: Partial<ProblemInput>) => {
-    const roomId = selectedRoomIdRef.current;
-    if (!roomId) return;
-    socketRef.current?.emit('updateProblem', { roomId, problemId, problem: update });
-  }, []);
-
-  const deleteProblem = useCallback((problemId: string) => {
-    const roomId = selectedRoomIdRef.current;
-    if (!roomId) return;
-    socketRef.current?.emit('deleteProblem', { roomId, problemId });
-  }, []);
-
-  const reorderProblems = useCallback((problemIds: string[]) => {
-    const roomId = selectedRoomIdRef.current;
-    if (!roomId) return;
-    socketRef.current?.emit('reorderProblems', { roomId, problemIds });
-  }, []);
-
-  const importProblems = useCallback((probs: ProblemInput[]) => {
-    const roomId = selectedRoomIdRef.current;
-    if (!roomId) return;
-    socketRef.current?.emit('importProblems', { roomId, problems: probs });
-  }, []);
-
-  const startQuiz = useCallback((roomId: string, joinWindowDuration?: number) => {
-    socketRef.current?.emit('startQuiz', { roomId, joinWindowDuration });
-  }, []);
-  
-  const getUserSubmissions = useCallback((roomId: string, userId: string) => {
-    socketRef.current?.emit('getUserSubmissions', { roomId, userId });
-  }, []);
-  
-  const getAllSubmissionsForExport = useCallback((roomId: string) => {
-    socketRef.current?.emit('getAllSubmissionsForExport', { roomId });
-  }, []);
-
-  const scheduleQuiz = useCallback((roomId: string, startTime: number) => {
-    socketRef.current?.emit('scheduleQuiz', { roomId, scheduledStartTime: startTime });
-  }, []);
-
-  const refreshQuizState = useCallback((roomId: string) => {
-    socketRef.current?.emit('getQuizState', { roomId });
-  }, []);
-
-  function clearUserStorage() {
-    localStorage.removeItem('quiz_userId');
-    localStorage.removeItem('quiz_roomId');
-    localStorage.removeItem('quiz_userName');
-  }
+  const submitAnswer = (roomId: string, problemId: string, optionSelected: AllowedSubmissions) => {
+    if (socket && userId && roomId && problemId != null) {
+      console.log('Submitting answer:', { roomId, problemId, optionSelected, userId });
+      socket.emit('submit', {
+        roomId,
+        problemId,
+        userId,
+        submission: optionSelected,
+      });
+    }
+  };
 
   return (
     <SocketContext.Provider
       value={{
         socket,
-        isConnected,
-        connectionError,
         quizState,
+        user,
         userId,
         currentRoomId,
+        isConnected,
+        connectionError,
         joinRoom,
         leaveRoom,
         submitAnswer,
-        bulkSubmit,
-        admin: {
-          isAuthenticated,
-          login,
-          quizSummaries,
-          selectedRoomId,
-          selectRoom,
-          createQuiz,
-          problems,
-          addProblem,
-          updateProblem,
-          deleteProblem,
-          reorderProblems,
-          importProblems,
-          startQuiz,
-          scheduleQuiz,
-          currentQuizState,
-          refreshQuizState,
-          currentQuizConfig,
-          getUserSubmissions,
-          getAllSubmissionsForExport,
-        },
+        createRoom,
       }}
     >
       {children}
