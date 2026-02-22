@@ -1,352 +1,93 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Badge } from './ui/badge';
-import { Alert, AlertDescription } from './ui/alert';
+import { useState } from 'react';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Badge } from '../components/ui/badge';
 import { useSocket } from '../contexts/useSocket';
-import type { AllowedSubmissions, SocketQuizState, User } from '../types/types';
+import { QuizList } from './admin/QuizList';
+import { CreateQuiz } from './admin/CreateQuiz';
+import { AddQuestions } from './admin/AddQuestions';
+import { PreviewQuiz } from './admin/PreviewQuestion';
+import { LaunchQuiz } from './admin/LaunchQuiz';
+
+type AdminStep = 'quiz-list' | 'create-quiz' | 'add-questions' | 'preview' | 'launch';
 
 export const Admin = () => {
-    
-  const { socket, isConnected } = useSocket();
+  const { isConnected, admin } = useSocket();
+  const { isAuthenticated, login } = admin;
+
+  const [step, setStep] = useState<AdminStep>('quiz-list');
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [password, setPassword] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [roomId, setRoomId] = useState('');
-  const [currentQuizState, setCurrentQuizState] = useState<SocketQuizState | null>(null);
-  const [activeQuizzes, setActiveQuizzes] = useState<string[]>([]);
-  const [error, setError] = useState<string>('');
-  const [success, setSuccess] = useState<string>('');
-  
-  // Problem creation form
-  const [problemTitle, setProblemTitle] = useState('');
-  const [problemDescription, setProblemDescription] = useState('');
-  const [options, setOptions] = useState(['', '', '', '']);
-  const [correctAnswer, setCorrectAnswer] = useState<AllowedSubmissions>(0);
-  
-  // JSON import
-  const [jsonInput, setJsonInput] = useState('');
-  const [importStatus, setImportStatus] = useState('');
+  const [authError, setAuthError] = useState('');
 
-  // Auto-refresh quiz state when room is selected
-  useEffect(() => {
-    if (socket && roomId.trim() && isAuthenticated) {
-      // Fetch initial state
-      socket.emit('getQuizState', { roomId: roomId.trim() });
-      
-      // Set up auto-refresh every 3 seconds
-      const interval = setInterval(() => {
-        socket.emit('getQuizState', { roomId: roomId.trim() });
-      }, 3000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [socket, roomId, isAuthenticated]);
+  const handleLogin = () => {
+    if (!password.trim()) { setAuthError('Password required'); return; }
+    setAuthError('');
+    login(password.trim());
+    setTimeout(() => {
+      if (!admin.isAuthenticated) setAuthError('Invalid password');
+    }, 1000);
+  };
 
-  // Listen for authentication events (always active)
-  useEffect(() => {
-    if (socket) {
-      socket.on('adminAuth', (data) => {
-        if (data.success) {
-          setIsAuthenticated(true);
-          setError('');
-        } else {
-          setError('Invalid admin password');
-          setIsAuthenticated(false);
-        }
-      });
-
-      return () => {
-        socket.off('adminAuth');
-      };
-    }
-  }, [socket]);
-
-  // Listen for admin events (only when authenticated)
-  useEffect(() => {
-    if (socket && isAuthenticated) {
-      // Load existing quizzes on authentication
-      socket.emit('getAllQuizzes');
-      
-      socket.on('quizzesList', (data) => {
-        setActiveQuizzes(data.quizzes.map((q: { roomId: string }) => q.roomId));
-      });
-      
-      socket.on('quizCreated', (data) => {
-        setSuccess(`Quiz room "${data.roomId}" created successfully!`);
-        setActiveQuizzes(prev => [...prev, data.roomId]);
-        setTimeout(() => setSuccess(''), 3000);
-      });
-
-      socket.on('problemAdded', () => {
-        setSuccess('Problem added successfully!');
-        setProblemTitle('');
-        setProblemDescription('');
-        setOptions(['', '', '', '']);
-        setCorrectAnswer(0);
-        setTimeout(() => setSuccess(''), 3000);
-      });
-
-      socket.on('problemsImported', (data) => {
-        setSuccess(`Successfully imported ${data.count} questions!`);
-        setJsonInput('');
-        setImportStatus('');
-        setTimeout(() => setSuccess(''), 3000);
-      });
-
-      socket.on('quizStateUpdate', (data) => {
-        setCurrentQuizState(data);
-      });
-
-      socket.on('error', (data) => {
-        setError(data.message);
-        setTimeout(() => setError(''), 5000);
-      });
-
-      return () => {
-        socket.off('quizzesList');
-        socket.off('quizCreated');
-        socket.off('problemAdded');
-        socket.off('problemsImported');
-        socket.off('quizStateUpdate');
-        socket.off('error');
-      };
-    }
-  }, [socket, isAuthenticated]);  const handleLogin = () => {
-    if (socket && password.trim()) {
-      console.log('Attempting admin login with password:', password.trim());
-      socket.emit('joinAdmin', { password: password.trim() });
-      setError('');
-      setSuccess('Authenticating...');
-    } else if (!socket) {
-      setError('Not connected to server');
+  /** Selecting an existing quiz from the list */
+  const handleSelectQuiz = (roomId: string) => {
+    admin.selectRoom(roomId);
+    setActiveRoomId(roomId);
+    // Check quiz status - if ended, go to launch (which shows leaderboard), otherwise add questions
+    const quiz = admin.quizSummaries.find((q) => q.roomId === roomId);
+    if (quiz?.status === 'ended') {
+      setStep('launch');
     } else {
-      setError('Please enter a password');
+      setStep('add-questions');
     }
   };
 
-  const handleCreateQuiz = () => {
-    if (socket && roomId.trim()) {
-      socket.emit('createQuiz', { roomId: roomId.trim() });
-      setError('');
-    }
+  /**
+   * Called after CreateQuiz completes.
+   * CreateQuiz already called admin.selectRoom internally — don't call it again.
+   */
+  const handleQuizCreated = (roomId: string) => {
+    setActiveRoomId(roomId);
+    setStep('add-questions');
   };
 
-  const handleCreateProblem = () => {
-    if (socket && roomId.trim() && problemTitle.trim() && problemDescription.trim()) {
-      const problem = {
-        title: problemTitle.trim(),
-        description: problemDescription.trim(),
-        options: options.map((option, index) => ({
-          id: index,
-          title: option.trim()
-        })).filter(option => option.title !== ''),
-        answer: correctAnswer
-      };
-      
-      if (problem.options.length < 2) {
-        setError('Please provide at least 2 options');
-        return;
-      }
-
-      socket.emit('createProblem', { roomId: roomId.trim(), problem });
-      setError('');
-    }
-  };
-
-  const handleNext = () => {
-    if (socket && roomId.trim()) {
-      socket.emit('next', { roomId: roomId.trim() });
-      setError('');
-    }
-  };
-
-  const handleStartQuiz = () => {
-    if (socket && roomId.trim()) {
-      socket.emit('start', { roomId: roomId.trim() });
-      setError('');
-    }
-  };
-
-  const handleGetQuizState = () => {
-    if (socket && roomId.trim()) {
-      socket.emit('getQuizState', { roomId: roomId.trim() });
-    }
-  };
-
-  const handleDownloadLeaderboard = () => {
-    if (!currentQuizState || 
-        (currentQuizState.type !== 'leaderboard' && currentQuizState.type !== 'ended')) {
-      setError('No leaderboard data available to download');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    const leaderboard = currentQuizState.leaderboard;
-    const csvContent = [
-      ['Rank', 'Name', 'Points'],
-      ...leaderboard.map((user, index) => [
-        index + 1,
-        user.name,
-        Math.floor(user.points)
-      ])
-    ].map(row => row.join(',')).join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${roomId}-leaderboard-nitjsr-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    setSuccess('Leaderboard downloaded successfully!');
-    setTimeout(() => setSuccess(''), 3000);
-  };
-
-  const handleSelectRoom = (quiz: string) => {
-    setRoomId(quiz);
-    setCurrentQuizState(null); // Clear old state
-  };
-
-  const updateOption = (index: number, value: string) => {
-    const newOptions = [...options];
-    newOptions[index] = value;
-    setOptions(newOptions);
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    if (!file.name.endsWith('.json')) {
-      setError('Please select a JSON file');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      setJsonInput(content);
-      setImportStatus(`Loaded ${file.name}`);
-    };
-    reader.onerror = () => {
-      setError('Failed to read file');
-      setTimeout(() => setError(''), 3000);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleImportJSON = () => {
-    try {
-      setImportStatus('Validating JSON...');
-      const parsed = JSON.parse(jsonInput);
-      
-      // Validate structure
-      if (!Array.isArray(parsed)) {
-        throw new Error('JSON must be an array of questions');
-      }
-      
-      // Validate each question
-      const validatedProblems = parsed.map((q, idx) => {
-        if (!q.title || typeof q.title !== 'string') {
-          throw new Error(`Question ${idx + 1}: Missing or invalid title`);
-        }
-        if (!q.description || typeof q.description !== 'string') {
-          throw new Error(`Question ${idx + 1}: Missing or invalid description`);
-        }
-        if (!Array.isArray(q.options) || q.options.length < 2) {
-          throw new Error(`Question ${idx + 1}: Must have at least 2 options`);
-        }
-        if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length) {
-          throw new Error(`Question ${idx + 1}: Invalid answer index`);
-        }
-        
-        return {
-          title: q.title.trim(),
-          description: q.description.trim(),
-          options: q.options.map((opt: string, i: number) => ({
-            id: i,
-            title: opt.trim()
-          })),
-          answer: q.answer
-        };
-      });
-      
-      setImportStatus(`Validated ${validatedProblems.length} questions. Importing...`);
-      
-      if (socket && roomId.trim()) {
-        socket.emit('importProblems', { 
-          roomId: roomId.trim(), 
-          problems: validatedProblems 
-        });
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Invalid JSON format');
-      setImportStatus('');
-      setTimeout(() => setError(''), 5000);
-    }
-  };
-
-  const sampleJSON = `[
-  {
-    "title": "What is the capital of France?",
-    "description": "Choose the correct capital city",
-    "options": ["London", "Paris", "Berlin", "Madrid"],
-    "answer": 1
-  },
-  {
-    "title": "What is 2 + 2?",
-    "description": "Basic arithmetic",
-    "options": ["3", "4", "5"],
-    "answer": 1
-  }
-]`;
+  // ── Auth screen ────────────────────────────────────────────────────────────
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold text-gray-800">Admin Login - NITJSR</CardTitle>
-            <CardDescription>
-              Enter admin password to access quiz management
-            </CardDescription>
-            <div className="flex items-center justify-center mt-2">
-              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-              <span className="ml-2 text-sm text-gray-600">
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </span>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex items-center justify-center p-3 sm:p-4">
+        <Card className="w-full max-w-md border-2 border-blue-200 shadow-xl bg-white">
+          <CardHeader className="text-center pb-3 sm:pb-4 bg-blue-600 text-white rounded-t-lg px-4 sm:px-6">
+            <CardTitle className="text-xl sm:text-2xl font-bold text-white">Sign In</CardTitle>
+            <CardDescription className="text-blue-100 mt-1 text-xs sm:text-sm">Welcome back you've been missed</CardDescription>
+            <div className="flex items-center justify-center gap-2 mt-2 sm:mt-3">
+              <div className={`h-2 sm:h-2.5 w-2 sm:w-2.5 rounded-full ${isConnected ? 'bg-green-400 shadow-lg shadow-green-400/50' : 'bg-red-400'}`} />
+              <span className="text-xs text-blue-100 font-medium">{isConnected ? 'Connected' : 'Connecting…'}</span>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {error && (
-              <Alert className="border-red-200 bg-red-50">
-                <AlertDescription className="text-red-700">{error}</AlertDescription>
-              </Alert>
+          <CardContent className="space-y-3 sm:space-y-4 pt-4 sm:pt-6 px-4 sm:px-6">
+            {authError && (
+              <div className="rounded-lg border-2 border-red-300 bg-red-50 px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-red-800 font-medium shadow-sm">{authError}</div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="password">Admin Password</Label>
+              <Label className="text-black font-medium text-sm sm:text-base">Password</Label>
               <Input
-                id="password"
                 type="password"
-                placeholder="Enter admin password"
+                placeholder="Enter Password"
                 value={password}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                className="border-blue-300 focus:border-blue-600 focus:ring-blue-600 text-sm sm:text-base"
               />
             </div>
-            <Button
-              onClick={handleLogin}
-              className="w-full"
-              disabled={!password.trim() || !isConnected}
+            <Button 
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-md text-sm sm:text-base" 
+              onClick={handleLogin} 
+              disabled={!isConnected}
             >
-              Login
+              Sign In
             </Button>
           </CardContent>
         </Card>
@@ -354,456 +95,116 @@ export const Admin = () => {
     );
   }
 
+  // ── Main admin UI ─────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
-      <div className="max-w-6xl mx-auto">
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              Quiz Admin Panel - NITJSR
-              <Badge variant={isConnected ? "default" : "destructive"}>
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </Badge>
-            </CardTitle>
-            <CardDescription>Manage quizzes, problems, and control flow</CardDescription>
-          </CardHeader>
-        </Card>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 p-3 sm:p-4 md:p-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6 p-3 sm:p-4 bg-white rounded-xl shadow-md border-2 border-blue-200">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-blue-700">
+              Quiz Admin
+            </h1>
+            <p className="text-blue-800 text-xs sm:text-sm mt-1">Manage quiz rooms and questions</p>
+          </div>
+          <Badge 
+            variant={isConnected ? 'default' : 'destructive'}
+            className={`text-xs sm:text-sm ${isConnected ? 'bg-blue-600 text-white shadow-md' : ''}`}
+          >
+            {isConnected ? 'Connected' : 'Disconnected'}
+          </Badge>
+        </div>
 
-        {error && (
-          <Alert className="mb-4 border-red-200 bg-red-50">
-            <AlertDescription className="text-red-700">{error}</AlertDescription>
-          </Alert>
+        {step !== 'quiz-list' && (
+          <StepBreadcrumb
+            step={step}
+            roomId={activeRoomId}
+            onStepClick={(s) => {
+              const order: AdminStep[] = ['quiz-list', 'create-quiz', 'add-questions', 'preview', 'launch'];
+              if (order.indexOf(s) <= order.indexOf(step)) setStep(s);
+            }}
+          />
         )}
 
-        {success && (
-          <Alert className="mb-4 border-green-200 bg-green-50">
-            <AlertDescription className="text-green-700">{success}</AlertDescription>
-          </Alert>
-        )}
-        
-        <Alert className="mb-4 border-blue-200 bg-blue-50">
-          <AlertDescription className="text-blue-700">
-            <strong>ℹ️ Important:</strong> Quiz data is stored in-memory on the backend server. 
-            All quizzes and data will be lost when the server restarts. Make sure to download 
-            leaderboards before closing quizzes!
-          </AlertDescription>
-        </Alert>
-
-        <Tabs defaultValue="quiz" className="w-full">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="quiz">Quiz Management</TabsTrigger>
-            <TabsTrigger value="problems">Create Problems</TabsTrigger>
-            <TabsTrigger value="import">Import JSON</TabsTrigger>
-            <TabsTrigger value="control">Quiz Control</TabsTrigger>
-            <TabsTrigger value="monitor">Live Monitor</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="quiz" className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Create New Quiz</CardTitle>
-                  <CardDescription>Set up a new quiz room</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="room-id">Room ID</Label>
-                    <Input
-                      id="room-id"
-                      placeholder="Enter unique room ID (e.g., quiz-001)"
-                      value={roomId}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomId(e.target.value)}
-                    />
-                  </div>
-                  <Button 
-                    onClick={handleCreateQuiz} 
-                    disabled={!roomId.trim()}
-                    className="w-full"
-                  >
-                    Create Quiz Room
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Active Quizzes</CardTitle>
-                  <CardDescription>Manage existing quiz rooms</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {activeQuizzes.length === 0 ? (
-                    <p className="text-gray-500 text-center py-4">No active quizzes</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {activeQuizzes.map((quiz) => (
-                        <div key={quiz} className="flex items-center justify-between p-2 border rounded">
-                          <span className="font-medium">{quiz}</span>
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={() => handleSelectRoom(quiz)}
-                          >
-                            Select
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="problems" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Create Problem</CardTitle>
-                <CardDescription>
-                  {roomId ? `Adding to room: ${roomId}` : 'Select a room ID first'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {!roomId && (
-                  <Alert className="border-yellow-200 bg-yellow-50">
-                    <AlertDescription className="text-yellow-700">
-                      Please select or create a room first in the Quiz Management tab
-                    </AlertDescription>
-                  </Alert>
-                )}
-                
-                <div className="space-y-2">
-                  <Label htmlFor="problem-title">Problem Title</Label>
-                  <Input
-                    id="problem-title"
-                    placeholder="Enter a clear, concise question title"
-                    value={problemTitle}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProblemTitle(e.target.value)}
-                    disabled={!roomId}
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="problem-description">Problem Description</Label>
-                  <Input
-                    id="problem-description"
-                    placeholder="Enter detailed question description"
-                    value={problemDescription}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProblemDescription(e.target.value)}
-                    disabled={!roomId}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Answer Options</Label>
-                  {options.map((option, index) => (
-                    <div key={index} className="flex items-center space-x-2">
-                      <span className="w-8 text-sm font-medium">
-                        {String.fromCharCode(65 + index)}.
-                      </span>
-                      <Input
-                        placeholder={`Option ${index + 1}`}
-                        value={option}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateOption(index, e.target.value)}
-                        disabled={!roomId}
-                      />
-                      <Button
-                        variant={correctAnswer === index ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setCorrectAnswer(index as AllowedSubmissions)}
-                        disabled={!roomId}
-                      >
-                        {correctAnswer === index ? '✓ Correct' : 'Mark Correct'}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={handleCreateProblem} 
-                    disabled={!roomId.trim() || !problemTitle.trim() || !problemDescription.trim() || options.filter(o => o.trim()).length < 2}
-                    className="flex-1"
-                  >
-                    Add Problem to Quiz
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="import" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Import Questions from JSON</CardTitle>
-                <CardDescription>
-                  {roomId ? `Importing to room: ${roomId}` : 'Select a room ID first'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {!roomId && (
-                  <Alert className="border-yellow-200 bg-yellow-50">
-                    <AlertDescription className="text-yellow-700">
-                      Please select or create a room first in the Quiz Management tab
-                    </AlertDescription>
-                  </Alert>
-                )}
-                
-                <div className="space-y-2">
-                  <Label htmlFor="json-file">Upload JSON File</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="json-file"
-                      type="file"
-                      accept=".json"
-                      onChange={handleFileUpload}
-                      className="flex-1"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500">Select a .json file from your computer</p>
-                </div>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-muted-foreground">Or paste JSON</span>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="json-input">JSON Questions</Label>
-                  <textarea
-                    id="json-input"
-                    className="w-full h-64 p-3 border rounded-md font-mono text-sm"
-                    placeholder="Paste your JSON here..."
-                    value={jsonInput}
-                    onChange={(e) => setJsonInput(e.target.value)}
-                  />
-                  <p className="text-xs text-gray-500">You can paste or edit JSON directly here</p>
-                </div>
-
-                {importStatus && (
-                  <Alert className="border-blue-200 bg-blue-50">
-                    <AlertDescription className="text-blue-700">{importStatus}</AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={handleImportJSON}
-                    disabled={!roomId.trim() || !jsonInput.trim()}
-                    className="flex-1"
-                  >
-                    Import Questions
-                  </Button>
-                  <Button 
-                    onClick={() => setJsonInput(sampleJSON)}
-                    variant="outline"
-                  >
-                    Load Sample
-                  </Button>
-                </div>
-
-                <div className="border rounded-lg p-4 bg-gray-50">
-                  <h4 className="font-semibold mb-2">JSON Format Guide:</h4>
-                  <pre className="text-xs bg-white p-3 rounded border overflow-x-auto">
-                    {sampleJSON}
-                  </pre>
-                  <ul className="mt-3 text-sm space-y-1 text-gray-700">
-                    <li>• <strong>title</strong>: Question title (string)</li>
-                    <li>• <strong>description</strong>: Question description (string)</li>
-                    <li>• <strong>options</strong>: Array of answer choices (strings)</li>
-                    <li>• <strong>answer</strong>: Index of correct answer (0-based number)</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="control" className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Quiz Controls</CardTitle>
-                  <CardDescription>
-                    {roomId ? `Controlling room: ${roomId}` : 'Select a room to control'}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {!roomId && (
-                    <Alert className="border-yellow-200 bg-yellow-50">
-                      <AlertDescription className="text-yellow-700">
-                        Please select a room first
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button 
-                      onClick={handleStartQuiz} 
-                      disabled={!roomId.trim()}
-                      size="lg"
-                      className="w-full"
-                    >
-                      Start Quiz
-                    </Button>
-                    
-                    <Button 
-                      onClick={handleNext} 
-                      disabled={!roomId.trim()}
-                      size="lg"
-                      variant="outline"
-                      className="w-full"
-                    >
-                      Next Question
-                    </Button>
-                  </div>
-                  
-                  <Button 
-                    onClick={handleGetQuizState} 
-                    disabled={!roomId.trim()}
-                    variant="secondary"
-                    className="w-full"
-                  >
-                    Refresh Quiz State
-                  </Button>
-                  
-                  {currentQuizState && (currentQuizState.type === 'leaderboard' || currentQuizState.type === 'ended') && (
-                    <Button 
-                      onClick={handleDownloadLeaderboard}
-                      variant="default"
-                      className="w-full bg-green-600 hover:bg-green-700"
-                    >
-                      📥 Download Leaderboard (CSV)
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Current Quiz State</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {currentQuizState ? (
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="font-medium">Status:</span>
-                        <Badge variant={currentQuizState.type === 'question' ? 'default' : 'secondary'}>
-                          {currentQuizState.type || 'Unknown'}
-                        </Badge>
-                      </div>
-                      {currentQuizState.type === 'question' && (
-                        <>
-                          <div className="flex justify-between">
-                            <span className="font-medium">Current Problem:</span>
-                            <span>{currentQuizState.problem.title}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="font-medium">Options:</span>
-                            <span>{currentQuizState.problem.options?.length || 0}</span>
-                          </div>
-                        </>
-                      )}
-                      {(currentQuizState.type === 'leaderboard' || currentQuizState.type === 'ended') && (
-                        <div className="flex justify-between">
-                          <span className="font-medium">Players:</span>
-                          <span>{currentQuizState.leaderboard.length}</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-center py-4">No quiz state available</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="monitor" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Live Quiz Monitor</CardTitle>
-                <CardDescription>
-                  Real-time monitoring of quiz activity
-                  {roomId && ` for room: ${roomId}`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!roomId ? (
-                  <Alert className="border-yellow-200 bg-yellow-50">
-                    <AlertDescription className="text-yellow-700">
-                      Please select a room to monitor
-                    </AlertDescription>
-                  </Alert>
-                ) : currentQuizState ? (
-                  <div className="space-y-4">
-                    {currentQuizState.type === 'question' && (
-                      <div className="border rounded p-4 bg-blue-50">
-                        <h3 className="font-semibold text-lg mb-2">Active Question</h3>
-                        <p className="font-medium">{currentQuizState.problem.title}</p>
-                        <p className="text-gray-600 mb-3">{currentQuizState.problem.description}</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {currentQuizState.problem.options?.map((option: { id: number; title: string }, index: number) => (
-                            <div key={index} className="flex items-center p-2 border rounded">
-                              <span className="font-medium mr-2">{String.fromCharCode(65 + index)}.</span>
-                              <span>{option.title}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-3 text-sm text-gray-600">
-                          Correct Answer: {String.fromCharCode(65 + (currentQuizState.problem.answer || 0))}
-                        </div>
-                      </div>
-                    )}
-
-                    {currentQuizState.type === 'leaderboard' && (
-                      <div className="border rounded p-4 bg-green-50">
-                        <h3 className="font-semibold text-lg mb-3">Current Leaderboard</h3>
-                        <div className="space-y-2">
-                          {currentQuizState.leaderboard
-                            .sort((a: User, b: User) => b.points - a.points)
-                            .map((player: User, index: number) => (
-                            <div key={player.id} className="flex items-center justify-between p-2 border rounded bg-white">
-                              <div className="flex items-center">
-                                <Badge variant={index < 3 ? 'default' : 'secondary'} className="mr-2">
-                                  #{index + 1}
-                                </Badge>
-                                <span className="font-medium">{player.name}</span>
-                              </div>
-                              <span className="font-bold">{Math.floor(player.points)} pts</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {currentQuizState.type === 'not_started' && (
-                      <div className="border rounded p-4 bg-gray-50 text-center">
-                        <p className="text-gray-600">Quiz hasn't started yet</p>
-                        <Button onClick={handleStartQuiz} className="mt-2">
-                          Start Quiz
-                        </Button>
-                      </div>
-                    )}
-
-                    {currentQuizState.type === 'ended' && (
-                      <div className="border rounded p-4 bg-red-50 text-center">
-                        <p className="text-red-600 font-medium">Quiz has ended</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-gray-500 text-center py-8">
-                    Click "Refresh Quiz State" to load current status
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        <div className="mt-4">
+          {step === 'quiz-list' && (
+            <QuizList onCreateNew={() => setStep('create-quiz')} onSelectQuiz={handleSelectQuiz} />
+          )}
+          {step === 'create-quiz' && (
+            <CreateQuiz onCreated={handleQuizCreated} onBack={() => setStep('quiz-list')} />
+          )}
+          {step === 'add-questions' && activeRoomId && (
+            <AddQuestions
+              roomId={activeRoomId}
+              onNext={() => setStep('preview')}
+              onBack={() => setStep('quiz-list')}
+            />
+          )}
+          {step === 'preview' && activeRoomId && (
+            <PreviewQuiz
+              roomId={activeRoomId}
+              onNext={() => setStep('launch')}
+              onBack={() => setStep('add-questions')}
+            />
+          )}
+          {step === 'launch' && activeRoomId && (
+            <LaunchQuiz roomId={activeRoomId} onBack={() => setStep('preview')} />
+          )}
+        </div>
       </div>
     </div>
+  );
+};
+
+// ── Breadcrumb ────────────────────────────────────────────────────────────────
+
+const STEP_LABELS: Record<AdminStep, string> = {
+  'quiz-list':     'Quizzes',
+  'create-quiz':   'Create',
+  'add-questions': 'Questions',
+  'preview':       'Preview',
+  'launch':        'Launch',
+};
+const STEP_ORDER: AdminStep[] = ['quiz-list', 'create-quiz', 'add-questions', 'preview', 'launch'];
+
+const StepBreadcrumb = ({
+  step, roomId, onStepClick,
+}: {
+  step: AdminStep;
+  roomId: string | null;
+  onStepClick: (s: AdminStep) => void;
+}) => {
+  const currentIdx = STEP_ORDER.indexOf(step);
+  const visibleSteps = step === 'create-quiz'
+    ? STEP_ORDER.slice(0, 2)
+    : STEP_ORDER.filter((s) => s !== 'create-quiz');
+
+  return (
+    <nav className="flex items-center gap-1 text-sm text-muted-foreground">
+      {visibleSteps.map((s, idx) => {
+        const sIdx = STEP_ORDER.indexOf(s);
+        const isCurrent = s === step;
+        const isPast = sIdx < currentIdx;
+        return (
+          <span key={s} className="flex items-center gap-1">
+            {idx > 0 && <span className="text-muted-foreground/50">/</span>}
+            <button
+              className={`px-2 py-1 rounded transition-colors ${
+                isCurrent ? 'font-semibold text-foreground'
+                : isPast   ? 'text-primary hover:underline cursor-pointer'
+                           : 'text-muted-foreground/50 cursor-not-allowed'
+              }`}
+              onClick={() => (isPast || isCurrent) && onStepClick(s)}
+              disabled={!isPast && !isCurrent}
+            >
+              {STEP_LABELS[s]}
+            </button>
+          </span>
+        );
+      })}
+      {roomId && (
+        <span className="ml-1 text-xs bg-muted px-2 py-0.5 rounded font-mono">{roomId}</span>
+      )}
+    </nav>
   );
 };
