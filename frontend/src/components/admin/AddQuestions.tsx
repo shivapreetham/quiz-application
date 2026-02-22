@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { ProblemForm } from './ProblemForm';
 import { useSocket } from '../../contexts/useSocket';
