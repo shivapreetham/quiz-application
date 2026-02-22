@@ -6,6 +6,7 @@ import {
   QuizConfig,
   QuizStatus,
   SocketQuizState,
+  Submission,
   User,
 } from './types/types';
 
@@ -28,6 +29,9 @@ export class Quiz {
 
   private scheduleTimer: NodeJS.Timeout | null = null;
   private joinWindowEndTime: number | null = null;
+
+  // Track per-user join time so they get full question duration
+  private userJoinTimes: Map<string, number> = new Map();
 
   constructor(roomId: string, config: QuizConfig) {
     this.roomId = roomId;
@@ -80,14 +84,29 @@ export class Quiz {
   // ─── User management ─────────────────────────────────────────────────────
 
   addUser(name: string): string | null {
-    // Check if user with same name already exists
     const existingUser = this.users.find((u) => u.name.toLowerCase().trim() === name.toLowerCase().trim());
     if (existingUser) {
-      // Return existing user ID instead of creating duplicate
+      // Always allow rejoins (e.g. page refresh) — don't block existing users
       return existingUser.id;
     }
+
+    // Block NEW users from joining after the join window has closed
+    if (this.joinWindowEndTime !== null && Date.now() > this.joinWindowEndTime) {
+      return null; // null signals "room not found / cannot join" to the client
+    }
+
+    // Also block new users if quiz is already running and there was never a join window
+    if (this.status === 'question' && this.joinWindowEndTime === null) {
+      return null;
+    }
+
     const id = this.generateId(8);
     this.users.push({ id, name: name.trim(), points: 0, totalTimeTaken: 0, correctAnswers: 0, totalAnswered: 0 });
+    
+    if (this.status === 'question' && this.config.durationType === 'per_question') {
+      this.userJoinTimes.set(id, Date.now());
+    }
+    
     return id;
   }
 
@@ -152,6 +171,8 @@ export class Quiz {
     const nextIdx = this.activeQuestionIndex + 1;
     if (nextIdx < this.problems.length) {
       this.activeQuestionIndex = nextIdx;
+      // Clear per-user join times for the new question (everyone gets full time again on next Q)
+      this.userJoinTimes.clear();
       this.activateCurrentQuestion(Date.now());
     } else {
       this.endQuiz();
@@ -194,7 +215,9 @@ export class Quiz {
 
     if (optionSelected !== null) {
       const now = Date.now();
-      const timeTaken = now - problem.startTime;
+      // Use per-user join time if available (so time is measured from when user joined, not question start)
+      const userEffectiveStart = this.userJoinTimes.get(userId) ?? problem.startTime;
+      const timeTaken = now - userEffectiveStart;
       const isCorrect = problem.answer === optionSelected;
       problem.submissions.push({ problemId, userId, isCorrect, optionSelected, timeTaken, submittedAt: now });
       user.totalAnswered++;
@@ -257,6 +280,17 @@ export class Quiz {
   getStatus(): QuizStatus { return this.status; }
   getProblems(): Problem[] { return this.problems; }
   getConfig(): QuizConfig { return this.config; }
+
+  getUserSubmissions(userId: string): Submission[] {
+    return this.problems.flatMap((p) => p.submissions.filter((s) => s.userId === userId));
+  }
+
+  getAllSubmissionsForExport(): { user: User; submissions: Submission[] }[] {
+    return this.users.map((user) => ({
+      user,
+      submissions: this.problems.flatMap((p) => p.submissions.filter((s) => s.userId === user.id)),
+    }));
+  }
 
   getLeaderboard(): User[] {
     return [...this.users].sort((a, b) =>

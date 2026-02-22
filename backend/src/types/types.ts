@@ -97,7 +97,7 @@ export interface UpdateProblemPayload { roomId: string; problemId: string; probl
 export interface DeleteProblemPayload { roomId: string; problemId: string; }
 export interface ReorderProblemsPayload { roomId: string; problemIds: string[]; }
 export interface ImportProblemsPayload  { roomId: string; problems: ProblemInput[]; }
-export interface StartQuizPayload     { roomId: string; }
+export interface StartQuizPayload { roomId: string; joinWindowDuration?: number; }
 export interface ScheduleQuizPayload  { roomId: string; scheduledStartTime: number; }
 export interface NextQuestionPayload  { roomId: string; }
 
