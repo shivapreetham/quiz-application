@@ -4,95 +4,66 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { useSocket } from '../contexts/useSocket';
 
 export const Home = () => {
-    const [userName, setUserName] = useState('');
-    const [roomId, setRoomId] = useState('');
-    const { joinRoom, isConnected } = useSocket();
-    const navigate = useNavigate();
+  const [userName, setUserName] = useState('');
+  const [roomId, setRoomId] = useState('');
+  const [error, setError] = useState('');
+  const { joinRoom, isConnected } = useSocket();
+  const navigate = useNavigate();
 
-    const handleJoinRoom = () => {
-        if (userName.trim() && roomId.trim()) {
-            joinRoom(roomId.trim(), userName.trim());
-            navigate(`/quiz/${roomId.trim()}`);
-        }
-    };
+  const handleJoin = () => {
+    if (!userName.trim()) { setError('Please enter your name'); return; }
+    if (!roomId.trim()) { setError('Please enter a room ID'); return; }
+    joinRoom(roomId.trim(), userName.trim());
+    navigate(`/quiz/${roomId.trim()}`);
+  };
 
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-            <Card className="w-full max-w-md">
-                <CardHeader className="text-center">
-                    <CardTitle className="text-2xl font-bold text-gray-800">Quiz Portal - NITJSR</CardTitle>
-                    <CardDescription>
-                        Join an existing quiz or create a new one
-                    </CardDescription>
-                    <div className="flex items-center justify-center mt-2">
-                        <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                        <span className="ml-2 text-sm text-gray-600">
-                            {isConnected ? 'Connected' : 'Disconnected'}
-                        </span>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <Tabs defaultValue="join" className="w-full">
-                        <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="join">Join Quiz</TabsTrigger>
-                            <TabsTrigger value="create">Create Quiz</TabsTrigger>
-                        </TabsList>
-
-                        <TabsContent value="join" className="space-y-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="join-name">Your Name</Label>
-                                <Input
-                                    id="join-name"
-                                    placeholder="Enter your display name"
-                                    value={userName}
-                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserName(e.target.value)}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="room-id">Room ID</Label>
-                                <Input
-                                    id="room-id"
-                                    placeholder="Ask your instructor for the room ID"
-                                    value={roomId}
-                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomId(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && userName.trim() && roomId.trim() && handleJoinRoom()}
-                                />
-                            </div>
-                            <Button
-                                onClick={handleJoinRoom}
-                                className="w-full"
-                                disabled={!userName.trim() || !roomId.trim() || !isConnected}
-                            >
-                                {!isConnected ? 'Connecting...' : 'Join Quiz'}
-                            </Button>
-                        </TabsContent>
-
-                        <TabsContent value="create" className="space-y-4">
-                            <div className="space-y-2 flex flex-col items-center p-10">
-                                <div className="text-center space-y-4">
-                                    <h3 className="font-semibold text-lg">Create Your Own Quiz</h3>
-                                    <p className="text-gray-600 text-sm">
-                                        To create and manage quizzes, switch to Admin Mode using the button in the top-right corner.
-                                    </p>
-                                    <div className="bg-blue-50 p-4 rounded-lg">
-                                        <p className="text-blue-800 text-sm">
-                                            <strong>Admin Features:</strong>
-                                            <br />• Create quiz rooms
-                                            <br />• Add questions and answers
-                                            <br />• Control quiz flow
-                                            <br />• Monitor live results
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </TabsContent>
-                    </Tabs>
-                </CardContent>
-            </Card>
-        </div>
-    );
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex items-center justify-center p-3 sm:p-4">
+      <Card className="w-full max-w-md border-2 border-blue-200 shadow-xl bg-white">
+        <CardHeader className="text-center pb-3 sm:pb-4 bg-blue-600 text-white rounded-t-lg px-4 sm:px-6">
+          <CardTitle className="text-xl sm:text-2xl font-bold text-white">Sign In</CardTitle>
+          <CardDescription className="text-blue-100 mt-1 text-xs sm:text-sm">Welcome back you've been missed</CardDescription>
+          <div className="flex items-center justify-center gap-2 mt-2 sm:mt-3">
+            <div className={`h-2 sm:h-2.5 w-2 sm:w-2.5 rounded-full ${isConnected ? 'bg-green-400 shadow-lg shadow-green-400/50' : 'bg-red-400'}`} />
+            <span className="text-xs text-blue-100 font-medium">{isConnected ? 'Connected' : 'Connecting...'}</span>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 sm:space-y-4 pt-4 sm:pt-6 px-4 sm:px-6">
+          {error && (
+            <div className="rounded-lg border-2 border-red-300 bg-red-50 px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-red-800 font-medium shadow-sm">{error}</div>
+          )}
+          <div className="space-y-2">
+            <Label className="text-black font-medium text-sm sm:text-base">Your Name</Label>
+            <Input
+              placeholder="Enter Your Name"
+              value={userName}
+              onChange={(e) => { setUserName(e.target.value); setError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+              className="border-blue-300 focus:border-blue-600 focus:ring-blue-600 text-sm sm:text-base"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-black font-medium text-sm sm:text-base">Room ID</Label>
+            <Input
+              placeholder="Enter Room ID"
+              value={roomId}
+              onChange={(e) => { setRoomId(e.target.value); setError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+              className="border-blue-300 focus:border-blue-600 focus:ring-blue-600 text-sm sm:text-base"
+            />
+          </div>
+          <Button
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-md text-sm sm:text-base"
+            onClick={handleJoin}
+            disabled={!isConnected}
+          >
+            {isConnected ? 'Join Quiz' : 'Connecting...'}
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 };

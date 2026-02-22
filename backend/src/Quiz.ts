@@ -1,333 +1,344 @@
-import { IoManager } from "./managers/IoManager";
-import { AllowedSubmissions, Problem, User } from "./types/types";
+import { IoManager } from './managers/IoManager';
+import {
+  AllowedSubmissions,
+  Problem,
+  ProblemInput,
+  QuizConfig,
+  QuizStatus,
+  SocketQuizState,
+  User,
+} from './types/types';
 
-const PROBLEM_TIME_S = 20;
-
+let globalProblemId = 0;
 
 export class Quiz {
+  public readonly roomId: string;
+  private config: QuizConfig;
+  private problems: Problem[];
+  private users: User[];
+  private status: QuizStatus;
 
-    public roomId: string;
-    private hasStarted: boolean;
-    private problems: Problem[];
-    private activeProblem: number;
-    private users: User[];
-    private currentState: "leaderboard" | "question" | "not_started" | "ended";
-    private leaderboardTimer: NodeJS.Timeout | null = null;
-    private hasEnded: boolean = false;
+  // per_question mode state
+  private activeQuestionIndex: number = 0;
+  private questionTimer: NodeJS.Timeout | null = null;
 
+  // total mode state
+  private quizDeadline: number | null = null;
+  private quizEndTimer: NodeJS.Timeout | null = null;
 
-    /* 
-    Constructor for the Quiz class.
-    Initializes the quiz with a room ID, sets the quiz state to not started,
-    initializes the problems array, sets the active problem index to 0,
-    initializes the users array, and sets the current state to "not_started".
+  private scheduleTimer: NodeJS.Timeout | null = null;
+  private joinWindowEndTime: number | null = null;
 
-    @param {string} roomId - The unique identifier for the quiz room.
-    @returns {void}
+  constructor(roomId: string, config: QuizConfig) {
+    this.roomId = roomId;
+    this.config = config;
+    this.problems = [];
+    this.users = [];
+    this.status = 'not_started';
+  }
+
+  // ─── Problem management ───────────────────────────────────────────────────
+
+  addProblem(input: ProblemInput): Problem {
+    this.assertEditable();
+    const problem: Problem = {
+      ...input,
+      id: (globalProblemId++).toString(),
+      startTime: 0,
+      submissions: [],
+    };
+    this.problems.push(problem);
+    return problem;
+  }
+
+  addProblems(inputs: ProblemInput[]): Problem[] {
+    return inputs.map((p) => this.addProblem(p));
+  }
+
+  updateProblem(problemId: string, update: Partial<ProblemInput>): void {
+    this.assertEditable();
+    const idx = this.problems.findIndex((p) => p.id === problemId);
+    if (idx === -1) throw new Error(`Problem ${problemId} not found`);
+    this.problems[idx] = { ...this.problems[idx], ...update };
+  }
+
+  deleteProblem(problemId: string): void {
+    this.assertEditable();
+    this.problems = this.problems.filter((p) => p.id !== problemId);
+  }
+
+  reorderProblems(problemIds: string[]): void {
+    this.assertEditable();
+    if (problemIds.length !== this.problems.length) throw new Error('Problem ID count mismatch');
+    this.problems = problemIds.map((id) => {
+      const p = this.problems.find((x) => x.id === id);
+      if (!p) throw new Error(`Problem ${id} not found`);
+      return p;
+    });
+  }
+
+  // ─── User management ─────────────────────────────────────────────────────
+
+  addUser(name: string): string | null {
+    // Check if user with same name already exists
+    const existingUser = this.users.find((u) => u.name.toLowerCase().trim() === name.toLowerCase().trim());
+    if (existingUser) {
+      // Return existing user ID instead of creating duplicate
+      return existingUser.id;
+    }
+    const id = this.generateId(8);
+    this.users.push({ id, name: name.trim(), points: 0, totalTimeTaken: 0, correctAnswers: 0, totalAnswered: 0 });
+    return id;
+  }
+
+  // ─── Lifecycle ───────────────────────────────────────────────────────────
+
+  schedule(startTime: number): void {
+    if (this.status !== 'not_started') throw new Error('Quiz already started or scheduled');
+    if (startTime <= Date.now()) throw new Error('Scheduled time must be in the future');
+    if (this.problems.length === 0) throw new Error('Cannot schedule quiz with no problems');
+    this.status = 'scheduled';
+    this.config.scheduledStartTime = startTime;
+    this.scheduleTimer = setTimeout(() => { this.scheduleTimer = null; this.beginQuiz(); }, startTime - Date.now());
+    this.broadcastCurrentState();
+  }
+
+  start(joinWindowDuration?: number): void {
+    if (this.status === 'scheduled') {
+      if (this.scheduleTimer) { clearTimeout(this.scheduleTimer); this.scheduleTimer = null; }
+    } else if (this.status !== 'not_started') {
+      throw new Error('Quiz already started');
+    }
+    if (this.problems.length === 0) throw new Error('Cannot start quiz with no problems');
     
-    */
-    constructor(roomId: string) {
-        this.roomId = roomId;
-        this.hasStarted = false;
-        this.problems = []
-        this.activeProblem = 0;
-        this.users = [];
-        this.currentState = "not_started";
-        console.log("room created");
-        setInterval(() => {
-            this.debug();
-        }, 10000)
+    // Set join window if provided
+    if (joinWindowDuration && joinWindowDuration > 0) {
+      this.config.joinWindowDuration = joinWindowDuration;
+      this.joinWindowEndTime = Date.now() + (joinWindowDuration * 1000);
+    }
+    
+    this.beginQuiz();
+  }
+
+  private beginQuiz(): void {
+    const now = Date.now();
+    this.config.actualStartTime = now;
+
+    if (this.config.durationType === 'per_question') {
+      // Start first question
+      this.activeQuestionIndex = 0;
+      this.status = 'question';
+      this.activateCurrentQuestion(now);
+    } else {
+      // total mode — open all questions at once
+      this.quizDeadline = now + (this.config.totalDuration ?? 1800) * 1000;
+      this.status = 'question'; // reuse 'question' status; state type differs
+      this.problems.forEach((p) => { p.startTime = now; p.submissions = []; });
+      this.broadcastCurrentState();
+      // Hard deadline
+      this.quizEndTimer = setTimeout(() => {
+        this.quizEndTimer = null;
+        this.endQuiz();
+      }, this.config.totalDuration! * 1000);
+    }
+  }
+
+  /** per_question only: move forward after submit / skip / timeout */
+  advancePerQuestion(): void {
+    if (this.config.durationType !== 'per_question') return;
+    if (this.status !== 'question') return;
+
+    this.clearQuestionTimer();
+    const nextIdx = this.activeQuestionIndex + 1;
+    if (nextIdx < this.problems.length) {
+      this.activeQuestionIndex = nextIdx;
+      this.activateCurrentQuestion(Date.now());
+    } else {
+      this.endQuiz();
+    }
+  }
+
+  private activateCurrentQuestion(now: number): void {
+    this.clearQuestionTimer();
+    const problem = this.problems[this.activeQuestionIndex];
+    problem.startTime = now;
+    problem.submissions = [];
+    this.broadcastCurrentState();
+
+    const duration = this.config.durationPerQuestion ?? 30;
+    this.questionTimer = setTimeout(() => {
+      this.questionTimer = null;
+      this.advancePerQuestion(); // auto-advance when time runs out
+    }, duration * 1000);
+  }
+
+  // ─── Submission ───────────────────────────────────────────────────────────
+
+  /**
+   * per_question mode: submit answer for the current active question.
+   * Records answer + advances to next question.
+   * Pass optionSelected = null to skip (no answer recorded).
+   */
+  submitPerQuestion(userId: string, problemId: string, optionSelected: AllowedSubmissions | null): boolean {
+    if (this.config.durationType !== 'per_question') return false;
+    if (this.status !== 'question') return false;
+
+    const problem = this.problems[this.activeQuestionIndex];
+    if (!problem || problem.id !== problemId) return false;
+
+    const user = this.users.find((u) => u.id === userId);
+    if (!user) return false;
+
+    // Prevent double submit for this question
+    if (problem.submissions.some((s) => s.userId === userId)) return false;
+
+    if (optionSelected !== null) {
+      const now = Date.now();
+      const timeTaken = now - problem.startTime;
+      const isCorrect = problem.answer === optionSelected;
+      problem.submissions.push({ problemId, userId, isCorrect, optionSelected, timeTaken, submittedAt: now });
+      user.totalAnswered++;
+      user.totalTimeTaken += timeTaken;
+      if (isCorrect) { user.correctAnswers++; user.points += problem.score; }
     }
 
-    /*
-    Debug method to log the current state of the quiz.
-    It logs the room ID, problems, users, current state, and active problem index to the console.
+    // Advance for this user — since all users share the same question stream,
+    // advance the server question only once any user submits/skips
+    // (server is single-stream: everyone moves together)
+    this.advancePerQuestion();
+    return true;
+  }
 
-    @returns {void}
-    */
+  /**
+   * total mode: user finishes the quiz and submits all answers at once.
+   * answers includes problemId, optionSelected, and optionally timeTaken (time spent on each question).
+   */
+  bulkSubmit(userId: string, answers: { problemId: string; optionSelected: AllowedSubmissions; timeTaken?: number }[]): boolean {
+    if (this.config.durationType !== 'total') return false;
+    if (this.status !== 'question') return false;
 
-    debug() {
-        console.log("----debug---")
-        console.log(this.roomId)
-        console.log(JSON.stringify(this.problems))
-        console.log(this.users)
-        console.log(this.currentState)
-        console.log(this.activeProblem);
+    const user = this.users.find((u) => u.id === userId);
+    if (!user) return false;
+
+    // Prevent double finish
+    if (this.problems.some((p) => p.submissions.some((s) => s.userId === userId))) return false;
+
+    const now = Date.now();
+    for (const { problemId, optionSelected, timeTaken: providedTimeTaken } of answers) {
+      const problem = this.problems.find((p) => p.id === problemId);
+      if (!problem) continue;
+      
+      // Use provided timeTaken if available (from client tracking), otherwise fallback to quiz start time
+      const timeTaken = providedTimeTaken !== undefined 
+        ? providedTimeTaken 
+        : now - problem.startTime;
+      
+      const isCorrect = problem.answer === optionSelected;
+      problem.submissions.push({ problemId, userId, isCorrect, optionSelected, timeTaken, submittedAt: now });
+      user.totalAnswered++;
+      user.totalTimeTaken += timeTaken;
+      if (isCorrect) { user.correctAnswers++; user.points += problem.score; }
     }
 
-    /*
-    Adds a problem to the quiz.
+    // End quiz when ALL users have submitted (or just end for everyone — design choice)
+    // Here we end for everyone when ANY user finishes (simpler for classroom use)
+    this.endQuiz();
+    return true;
+  }
 
-    @param {Problem} problem - The problem to add.
+  private endQuiz(): void {
+    this.clearAllTimers();
+    this.status = 'ended';
+    this.broadcastCurrentState();
+  }
 
-    @returns {void}
-    */
+  // ─── Getters ──────────────────────────────────────────────────────────────
 
-    addProblem(problem: Problem) {
-        this.problems.push(problem);
-        console.log(this.problems);
-    }
+  getStatus(): QuizStatus { return this.status; }
+  getProblems(): Problem[] { return this.problems; }
+  getConfig(): QuizConfig { return this.config; }
 
-    /*
-    Starts the quiz by setting the hasStarted flag to true and setting the first problem as the active problem.
-    It emits the "problem" event to the room with the first problem.
+  getLeaderboard(): User[] {
+    return [...this.users].sort((a, b) =>
+      b.points !== a.points ? b.points - a.points : a.totalTimeTaken - b.totalTimeTaken
+    );
+  }
 
-    @returns {void}
-    */
+  getSummary() {
+    return {
+      roomId: this.roomId,
+      status: this.status,
+      problemCount: this.problems.length,
+      userCount: this.users.length,
+      config: this.config,
+      scheduledStartTime: this.config.scheduledStartTime,
+    };
+  }
 
-    start() {
-        if (this.hasStarted) {
-            console.log("Quiz already started");
-            return;
-        }
-        if (this.problems.length === 0) {
-            throw new Error("Cannot start quiz: No problems added");
-        }
-        if (this.hasEnded) {
-            throw new Error("Cannot start quiz: Quiz has ended");
-        }
-        this.hasStarted = true;
-        this.setActiveProblem(this.problems[0]);
-    }
-
-    /*
-    Sets the active problem for the quiz.
-
-    @param {Problem} problem - The problem to set as active.
-    @returns {void}
-    */
-
-    setActiveProblem(problem: Problem) {
-        console.log("set active problem")
-        // Clear any existing timer to prevent race conditions
-        if (this.leaderboardTimer) {
-            clearTimeout(this.leaderboardTimer);
-            this.leaderboardTimer = null;
-        }
-        
-        this.currentState = "question"
-        problem.startTime = new Date().getTime();
-        problem.submissions = [];
-        IoManager.getIo().to(this.roomId).emit("problem", {
-            problem
-        })
-        
-        // Set new timer for leaderboard
-        this.leaderboardTimer = setTimeout(() => {
-            this.sendLeaderboard();
-            this.leaderboardTimer = null;
-        }, PROBLEM_TIME_S * 1000);
-    }
-
-    /*
-
-    Sends the leaderboard to the room and updates the current state to "leaderboard".
-    @returns {void}
-
-    */
-
-
-    sendLeaderboard() {
-        console.log("send leaderboard")
-        this.currentState = "leaderboard"
-        const leaderboard = this.getLeaderboard();
-        IoManager.getIo().to(this.roomId).emit("leaderboard", {
-            leaderboard
-        })
-    }
-
-    /*
-    Moves to the next problem in the quiz.
-
-    @returns {void}
-    */
-
-    next() {
-        if (!this.hasStarted) {
-            throw new Error("Cannot move to next: Quiz not started");
-        }
-        if (this.hasEnded) {
-            console.log("Quiz has already ended");
-            return;
-        }
-        
-        // Clear the current timer before moving to next
-        if (this.leaderboardTimer) {
-            clearTimeout(this.leaderboardTimer);
-            this.leaderboardTimer = null;
-        }
-        
-        this.activeProblem++;
-        const problem = this.problems[this.activeProblem];
-        if (problem) {
-            this.setActiveProblem(problem);
+  getCurrentState(): SocketQuizState {
+    switch (this.status) {
+      case 'not_started': return { type: 'not_started' };
+      case 'scheduled':   return { type: 'scheduled', scheduledStartTime: this.config.scheduledStartTime! };
+      case 'question': {
+        if (this.config.durationType === 'per_question') {
+          const problem = this.problems[this.activeQuestionIndex];
+          const duration = this.config.durationPerQuestion ?? 30;
+          const questionDeadline = problem.startTime + duration * 1000;
+          return {
+            type: 'question',
+            problem,
+            questionIndex: this.activeQuestionIndex,
+            totalQuestions: this.problems.length,
+            config: this.config,
+            questionDeadline,
+            quizStartTime: this.config.actualStartTime,
+            joinWindowEndTime: this.joinWindowEndTime,
+          };
         } else {
-            this.activeProblem--;
-            this.endQuiz();
+          // total mode
+          return {
+            type: 'free_attempt',
+            problems: this.problems,
+            totalQuestions: this.problems.length,
+            config: this.config,
+            quizDeadline: this.quizDeadline!,
+            quizStartTime: this.config.actualStartTime,
+            joinWindowEndTime: this.joinWindowEndTime,
+          };
         }
+      }
+      case 'ended': return { type: 'ended', leaderboard: this.getLeaderboard() };
     }
+  }
 
-    /*
-    Ends the quiz and sends final results.
+  // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    @returns {void}
-    */
-    endQuiz() {
-        if (this.hasEnded) {
-            return;
-        }
-        
-        console.log("Ending quiz");
-        this.hasEnded = true;
-        this.currentState = "ended";
-        
-        // Clear any pending timers
-        if (this.leaderboardTimer) {
-            clearTimeout(this.leaderboardTimer);
-            this.leaderboardTimer = null;
-        }
-        
-        const leaderboard = this.getLeaderboard();
-        IoManager.getIo().to(this.roomId).emit("quiz_ended", {
-            leaderboard
-        });
+  private broadcastCurrentState(): void {
+    IoManager.getIo().to(this.roomId).emit('stateUpdate', this.getCurrentState());
+  }
+
+  private clearQuestionTimer(): void {
+    if (this.questionTimer) { clearTimeout(this.questionTimer); this.questionTimer = null; }
+  }
+
+  private clearAllTimers(): void {
+    this.clearQuestionTimer();
+    if (this.quizEndTimer) { clearTimeout(this.quizEndTimer); this.quizEndTimer = null; }
+  }
+
+  destroy(): void {
+    this.clearAllTimers();
+    if (this.scheduleTimer) { clearTimeout(this.scheduleTimer); this.scheduleTimer = null; }
+  }
+
+  private assertEditable(): void {
+    if (this.status !== 'not_started' && this.status !== 'scheduled') {
+      throw new Error('Cannot modify problems after quiz has started');
     }
+  }
 
-    /*
-    Generates a random string of a specified length.
-
-    @param {number} length - The length of the random string to generate.
-    @returns {string} - The generated random string.
-    */
-
-    genRandonString(length: number) {
-        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()';
-        var charLength = chars.length;
-        var result = '';
-        for (var i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * charLength));
-        }
-        return result;
-    }
-
-    /*
-    Adds a user to the quiz.
-
-    @param {string} name - The name of the user to add.
-    @returns {string} - The ID of the added user.
-    */
-
-    addUser(name: string) {
-        const id = this.genRandonString(7);
-        this.users.push({
-            id,
-            name,
-            points: 0
-        })
-        return id;
-    }
-
-    /*
-    Submits a user's answer to a problem in the quiz.
-    @param {string} userId - The ID of the user submitting the answer.
-    @param {string} roomId - The ID of the room where the quiz is taking place.
-    @param {string} problemId - The ID of the problem being answered.
-    @param {AllowedSubmissions} submission - The user's submission.
-
-    @returns {void}
-    */
-
-    submit(userId: string, roomId: string, problemId: string, submission: AllowedSubmissions) {
-        console.log("userId");
-        console.log(userId);
-        
-        if (!this.hasStarted) {
-            console.log("Cannot submit: Quiz not started");
-            return false;
-        }
-        
-        if (this.hasEnded) {
-            console.log("Cannot submit: Quiz has ended");
-            return false;
-        }
-        
-        const problem = this.problems.find(x => x.id == problemId);
-        const user = this.users.find(x => x.id === userId);
-
-        if (!problem || !user) {
-            console.log("problem or user not found")
-            return false;
-        }
-        
-        const existingSubmission = problem.submissions.find(x => x.userId === userId);
-
-        if (existingSubmission) {
-            console.log("existing submission found")
-            return false;
-        }
-        
-        const isCorrect = problem.answer === submission;
-
-        problem.submissions.push({
-            problemId,
-            userId,
-            isCorrect,
-            optionSelected: submission
-        });
-        
-        // Only award points if answer is correct
-        if (isCorrect) {
-            const timeTaken = new Date().getTime() - problem.startTime;
-            const timeBonus = Math.max(0, 1000 - (500 * timeTaken / (PROBLEM_TIME_S * 1000)));
-            user.points += Math.floor(timeBonus);
-        }
-        
-        return true;
-    }
-
-    /*
-    Gets the leaderboard of the quiz, sorted by user points in descending order.
-
-    @returns {Array} - The leaderboard of the quiz.
-    */
-
-    getLeaderboard() {
-        return this.users.sort((a, b) => a.points < b.points ? 1 : -1).slice(0, 20);;
-    }
-
-    /*
-    Gets the current state of the quiz.
-
-    @returns {Object} - The current state of the quiz.
-    */
-
-    getCurrentState() {
-        if (this.currentState === "not_started") {
-            return {
-                type: "not_started"
-            }
-        }
-        if (this.currentState === "ended") {
-            return {
-                type: "ended",
-                leaderboard: this.getLeaderboard()
-            }
-        }
-        if (this.currentState === "leaderboard") {
-            return {
-                type: "leaderboard",
-                leaderboard: this.getLeaderboard()
-            }
-        }
-        if (this.currentState === "question") {
-            const problem = this.problems[this.activeProblem];
-            return {
-                type: "question",
-                problem
-            }
-        }
-    }
-
-
-
+  private generateId(length: number): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
 }
