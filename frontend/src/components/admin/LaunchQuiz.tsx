@@ -23,7 +23,7 @@ export const LaunchQuiz = ({ roomId, onBack }: Props) => {
   const [joinWindowDuration, setJoinWindowDuration] = useState(60); // seconds
   const [showJoinWindow, setShowJoinWindow] = useState(false);
 
-  // Refresh state every 3s - continue even after quiz ends to show results
+  // Refresh state every 3s
   useEffect(() => {
     refreshQuizState(roomId);
     const interval = setInterval(() => refreshQuizState(roomId), 3000);
@@ -71,33 +71,35 @@ export const LaunchQuiz = ({ roomId, onBack }: Props) => {
     const problems = exportData?.problems || 
       (currentQuizState?.type === 'free_attempt' ? currentQuizState.problems : []);
     
-    // Build CSV header with per-question columns
-    const baseHeader = ['Rank', 'Name', 'Points', 'Total Time (s)', 'Correct', 'Total'];
+    // Build CSV header — per-question time in ms
+    const baseHeader = ['Rank', 'Name', 'Points', 'Total Time (ms)', 'Correct', 'Total'];
     const questionHeaders: string[] = [];
     if (problems.length > 0) {
       for (let i = 1; i <= problems.length; i++) {
-        questionHeaders.push(`Q${i} Time (s)`);
+        questionHeaders.push(`Q${i} Time (ms)`);
       }
     }
     const csvHeader = [...baseHeader, ...questionHeaders].join(',');
     
-    // Build CSV rows with per-question times
+    // Build CSV rows — timeTaken values are stored in ms on the backend
     const csvRows = sorted.map((user, idx) => {
-      const row = [
+      const row: (string | number)[] = [
         idx + 1,
         user.name,
         user.points,
-        (user.totalTimeTaken / 1000).toFixed(1),
+        user.totalTimeTaken,   // ms, no conversion
         user.correctAnswers,
         user.totalAnswered,
       ];
       
-      // Add per-question times from export data
+      // Add per-question times in ms
       if (problems.length > 0 && exportData?.submissions) {
-        const userSubmissions = exportData.submissions.find((s: any) => s.userId === user.id);
+        const userSubmissions = exportData.submissions.find((s: any) => s.user?.id === user.id || s.userId === user.id);
+        const submissionList = userSubmissions?.submissions ?? [];
         const questionTimes = problems.map((problem: any) => {
-          const submission = userSubmissions?.submissions.find((s: any) => s.problemId === problem.id);
-          return submission ? (submission.timeTaken / 1000).toFixed(1) : '';
+          const submission = submissionList.find((s: any) => s.problemId === problem.id);
+          // timeTaken is already in ms from the backend
+          return submission ? submission.timeTaken : '';
         });
         row.push(...questionTimes);
       }
@@ -277,7 +279,6 @@ export const LaunchQuiz = ({ roomId, onBack }: Props) => {
 };
 
 const LeaderboardList = ({ leaderboard, showFull }: { leaderboard: User[]; showFull?: boolean }) => {
-  // Remove duplicates by user ID
   const uniqueUsers = leaderboard.filter((user, index, self) =>
     index === self.findIndex((u) => u.id === user.id)
   );

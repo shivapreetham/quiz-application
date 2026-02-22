@@ -42,22 +42,28 @@ export const Quiz = () => {
   }
 
   if (quizState.type === 'question') {
-    // Handle join window - adjust deadline if user joined during window
-    let adjustedDeadline = quizState.questionDeadline;
-    if (quizState.quizStartTime && quizState.joinWindowEndTime && Date.now() < quizState.joinWindowEndTime) {
-      // User joined during join window - adjust deadline to account for quiz start time
-      const timeSinceStart = Date.now() - quizState.quizStartTime;
-      const questionDuration = quizState.config.durationPerQuestion ?? 30;
-      adjustedDeadline = quizState.quizStartTime + (quizState.questionIndex + 1) * questionDuration * 1000;
+    const duration = quizState.config.durationPerQuestion ?? 30;
+
+    // If user joined during the join window, give them the FULL question duration
+    // Otherwise use the server-provided deadline
+    let effectiveDeadline = quizState.questionDeadline;
+    const now = Date.now();
+    const joinWindowStillOpen =
+      quizState.joinWindowEndTime != null && now < quizState.joinWindowEndTime;
+
+    if (joinWindowStillOpen) {
+      // User just joined — give them full duration from now
+      effectiveDeadline = now + duration * 1000;
     }
-    
+
     return (
       <PerQuestionMode
         roomId={roomId!}
         problem={quizState.problem}
         questionIndex={quizState.questionIndex}
         totalQuestions={quizState.totalQuestions}
-        questionDeadline={adjustedDeadline}
+        questionDeadline={effectiveDeadline}
+        isLastQuestion={quizState.questionIndex === quizState.totalQuestions - 1}
         onSubmit={(option) => submitAnswer(roomId!, quizState.problem.id, option)}
         onSkip={() => submitAnswer(roomId!, quizState.problem.id, null)}
       />
@@ -68,7 +74,6 @@ export const Quiz = () => {
     // Handle join window - adjust deadline if user joined during window
     let adjustedDeadline = quizState.quizDeadline;
     if (quizState.quizStartTime && quizState.joinWindowEndTime && Date.now() < quizState.joinWindowEndTime) {
-      // User joined during join window - adjust deadline based on quiz start time
       const totalDuration = quizState.config.totalDuration ?? 1800;
       adjustedDeadline = quizState.quizStartTime + totalDuration * 1000;
     }
@@ -84,32 +89,31 @@ export const Quiz = () => {
   }
 
   if (quizState.type === 'ended') {
-    // Find user's own score
     const userScore = quizState.leaderboard.find((u) => u.id === userId);
     const sorted = [...quizState.leaderboard].sort((a, b) =>
       b.points !== a.points ? b.points - a.points : a.totalTimeTaken - b.totalTimeTaken
     );
     const userRank = userScore ? sorted.findIndex((u) => u.id === userId) + 1 : null;
     
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex items-center justify-center p-3 sm:p-4 md:p-6">
-      <Card className="w-full max-w-2xl border-2 border-blue-300 shadow-xl bg-white">
-        <CardHeader className="text-center pb-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-t-lg px-4 sm:px-6">
-          <CardTitle className="text-xl sm:text-2xl font-bold text-white">Quiz Complete!</CardTitle>
-          <CardDescription className="text-blue-100 mt-1 text-sm sm:text-base">Your Results</CardDescription>
-        </CardHeader>
-        <CardContent className="p-4 sm:p-6">
-          {userScore ? (
-            <UserScoreView user={userScore} rank={userRank} totalParticipants={quizState.leaderboard.length} />
-          ) : (
-            <div className="text-center py-8 text-blue-800">
-              <p>Your results are being processed...</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex items-center justify-center p-3 sm:p-4 md:p-6">
+        <Card className="w-full max-w-2xl border-2 border-blue-300 shadow-xl bg-white">
+          <CardHeader className="text-center pb-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-t-lg px-4 sm:px-6">
+            <CardTitle className="text-xl sm:text-2xl font-bold text-white">Quiz Complete!</CardTitle>
+            <CardDescription className="text-blue-100 mt-1 text-sm sm:text-base">Your Results</CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6">
+            {userScore ? (
+              <UserScoreView user={userScore} rank={userRank} totalParticipants={quizState.leaderboard.length} />
+            ) : (
+              <div className="text-center py-8 text-blue-800">
+                <p>Your results are being processed...</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return null;
@@ -123,6 +127,7 @@ interface PerQuestionProps {
   questionIndex: number;
   totalQuestions: number;
   questionDeadline: number;
+  isLastQuestion: boolean;
   onSubmit: (option: AllowedSubmissions) => void;
   onSkip: () => void;
 }
@@ -132,32 +137,39 @@ const PerQuestionMode = ({
   questionIndex,
   totalQuestions,
   questionDeadline,
+  isLastQuestion,
   onSubmit,
   onSkip,
 }: PerQuestionProps) => {
   const [selectedOption, setSelectedOption] = useState<AllowedSubmissions | null>(null);
   const [hasActed, setHasActed] = useState(false);
+  // effectiveDeadline is set once when the component mounts for a question
+  // so that late-joining users retain their full allocated time
+  const [effectiveDeadline] = useState<number>(questionDeadline);
   const [timeLeft, setTimeLeft] = useState<number>(() =>
     Math.max(0, Math.round((questionDeadline - Date.now()) / 1000))
   );
+  // Track when this question started for the user (for per-question ms timing)
+  const questionStartRef = useRef<number>(Date.now());
 
   // Reset on new question
   useEffect(() => {
     setSelectedOption(null);
     setHasActed(false);
-    setTimeLeft(Math.max(0, Math.round((questionDeadline - Date.now()) / 1000)));
-  }, [problem.id, questionDeadline]);
+    setTimeLeft(Math.max(0, Math.round((effectiveDeadline - Date.now()) / 1000)));
+    questionStartRef.current = Date.now();
+  }, [problem.id, effectiveDeadline]);
 
   // Countdown
   useEffect(() => {
     if (hasActed) return;
     const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.round((questionDeadline - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.round((effectiveDeadline - Date.now()) / 1000));
       setTimeLeft(remaining);
       if (remaining === 0) clearInterval(interval);
     }, 500);
     return () => clearInterval(interval);
-  }, [questionDeadline, hasActed]);
+  }, [effectiveDeadline, hasActed]);
 
   const handleSubmit = () => {
     if (selectedOption === null || hasActed) return;
@@ -172,7 +184,7 @@ const PerQuestionMode = ({
   };
 
   const timeCritical = timeLeft <= 5;
-  const duration = Math.round((questionDeadline - problem.startTime) / 1000);
+  const duration = Math.round((effectiveDeadline - questionStartRef.current) / 1000);
   const progress = duration > 0 ? ((duration - timeLeft) / duration) * 100 : 0;
 
   return (
@@ -215,7 +227,13 @@ const PerQuestionMode = ({
           <CardContent className="space-y-2 sm:space-y-3 px-3 sm:px-6">
             {hasActed && (
               <div className="rounded-lg border-2 border-blue-300 bg-blue-50 px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-blue-900 font-medium shadow-sm">
-                {selectedOption !== null ? 'Answer submitted! Moving to next question…' : 'Skipped. Moving to next question…'}
+                {selectedOption !== null
+                  ? isLastQuestion
+                    ? 'Answer submitted! Quiz complete, waiting for results…'
+                    : 'Answer submitted! Moving to next question…'
+                  : isLastQuestion
+                    ? 'Skipped. Quiz complete, waiting for results…'
+                    : 'Skipped. Moving to next question…'}
               </div>
             )}
 
@@ -255,7 +273,7 @@ const PerQuestionMode = ({
                   onClick={handleSubmit}
                   disabled={selectedOption === null || timeLeft === 0}
                 >
-                  {timeLeft === 0 ? "Time's Up!" : 'Submit Answer'}
+                  {timeLeft === 0 ? "Time's Up!" : isLastQuestion ? 'Submit & Finish Quiz' : 'Submit Answer'}
                 </Button>
                 <Button
                   variant="outline"
@@ -264,7 +282,7 @@ const PerQuestionMode = ({
                   disabled={timeLeft === 0}
                   className="border-blue-300 hover:bg-blue-50 text-blue-700 text-sm sm:text-base"
                 >
-                  Skip →
+                  {isLastQuestion ? 'Skip & Finish' : 'Skip →'}
                 </Button>
               </div>
             )}
@@ -285,9 +303,7 @@ interface FreeAttemptProps {
 }
 
 const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps) => {
-  // answers keyed by problemId
   const [answers, setAnswers] = useState<Record<string, AllowedSubmissions>>({});
-  // Track when user first views each question (for accurate time tracking)
   const [questionViewTimes, setQuestionViewTimes] = useState<Record<string, number>>({});
   const [activeIdx, setActiveIdx] = useState(0);
   const [timeLeft, setTimeLeft] = useState<number>(() =>
@@ -295,6 +311,10 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
   );
   const [finished, setFinished] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // Track time spent per question in ms
+  const [questionTimeSpent, setQuestionTimeSpent] = useState<Record<string, number>>({});
+  const questionStartTimeRef = useRef<number>(Date.now());
 
   // Countdown
   useEffect(() => {
@@ -310,37 +330,26 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
     return () => clearInterval(interval);
   }, [quizDeadline, finished]);
 
-  // Track time spent on each question
-  const [questionTimeSpent, setQuestionTimeSpent] = useState<Record<string, number>>({});
-  const questionStartTimeRef = useRef<number>(Date.now());
+  const activeProblem = problems[activeIdx];
 
-  // Track when user views a question
+  // Track time when user switches questions
   useEffect(() => {
-    // Save time spent on previous question
-    if (activeIdx > 0) {
-      const prevProblem = problems[activeIdx - 1];
-      if (prevProblem) {
-        const timeSpent = Date.now() - questionStartTimeRef.current;
-        setQuestionTimeSpent((prev) => ({
-          ...prev,
-          [prevProblem.id]: (prev[prevProblem.id] || 0) + timeSpent,
-        }));
-      }
-    }
-    // Start tracking time for current question
-    questionStartTimeRef.current = Date.now();
-    if (activeProblem && !questionViewTimes[activeProblem.id]) {
-      setQuestionViewTimes((prev) => ({
+    const prevProblem = problems[activeIdx > 0 ? activeIdx - 1 : -1];
+    if (prevProblem) {
+      const timeSpent = Date.now() - questionStartTimeRef.current;
+      setQuestionTimeSpent((prev) => ({
         ...prev,
-        [activeProblem.id]: Date.now(),
+        [prevProblem.id]: (prev[prevProblem.id] || 0) + timeSpent,
       }));
     }
-  }, [activeIdx, activeProblem]);
+    questionStartTimeRef.current = Date.now();
+    if (activeProblem && !questionViewTimes[activeProblem.id]) {
+      setQuestionViewTimes((prev) => ({ ...prev, [activeProblem.id]: Date.now() }));
+    }
+  }, [activeIdx]);
 
   const handleFinish = (forced = false) => {
     if (finished) return;
-    
-    // Save time spent on current question
     const currentProblem = problems[activeIdx];
     if (currentProblem) {
       const timeSpent = Date.now() - questionStartTimeRef.current;
@@ -349,20 +358,16 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
         [currentProblem.id]: (prev[currentProblem.id] || 0) + timeSpent,
       }));
     }
-    
     setFinished(true);
-    const answerList = Object.entries(answers).map(([problemId, optionSelected]) => {
-      const timeTaken = questionTimeSpent[problemId] || 0;
-      return {
-        problemId,
-        optionSelected,
-        timeTaken: timeTaken > 0 ? timeTaken : undefined,
-      };
-    });
+    // timeTaken is in ms
+    const answerList = Object.entries(answers).map(([problemId, optionSelected]) => ({
+      problemId,
+      optionSelected,
+      timeTaken: questionTimeSpent[problemId] || 0,
+    }));
     onFinish(answerList);
   };
 
-  const activeProblem = problems[activeIdx];
   const answeredCount = Object.keys(answers).length;
   const totalMinutes = Math.floor(timeLeft / 60);
   const totalSeconds = timeLeft % 60;
@@ -539,7 +544,6 @@ const FreeAttemptMode = ({ problems, quizDeadline, onFinish }: FreeAttemptProps)
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-// User's own score view (for regular users)
 const UserScoreView = ({
   user, rank, totalParticipants,
 }: {
@@ -616,114 +620,3 @@ const StatusCard = ({
     </Card>
   </div>
 );
-
-const LeaderboardView = ({
-  leaderboard, currentUserId, final,
-}: {
-  leaderboard: User[];
-  currentUserId: string | null;
-  final?: boolean;
-}) => {
-  // Remove duplicates by user ID
-  const uniqueUsers = leaderboard.filter((user, index, self) =>
-    index === self.findIndex((u) => u.id === user.id)
-  );
-  
-  const sorted = [...uniqueUsers].sort((a, b) =>
-    b.points !== a.points ? b.points - a.points : a.totalTimeTaken - b.totalTimeTaken
-  );
-
-  const downloadCSV = () => {
-    const csv = [
-      ['Rank', 'Name', 'Points', 'Time (s)', 'Correct', 'Total', 'Score (Points + Time)'],
-      ...sorted.map((u, i) => {
-        const timeScore = Math.max(0, 1000 - (u.totalTimeTaken / 1000)); // Time bonus (inverse)
-        const finalScore = u.points * 1000 + timeScore; // Combined score
-        return [
-          i + 1, 
-          u.name, 
-          u.points, 
-          (u.totalTimeTaken / 1000).toFixed(1), 
-          u.correctAnswers, 
-          u.totalAnswered,
-          finalScore.toFixed(1)
-        ];
-      }),
-    ].map((r) => r.join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `leaderboard-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-  };
-
-  const formatTime = (ms: number) => {
-    const seconds = ms / 1000;
-    if (seconds < 60) return `${seconds.toFixed(1)}s`;
-    const minutes = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${minutes}m ${secs}s`;
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="text-center mb-4">
-        <h3 className="text-lg font-semibold text-blue-900">Final Rankings</h3>
-        <p className="text-sm text-blue-700 mt-1">Ranked by points, then time taken</p>
-      </div>
-      {sorted.map((user, idx) => {
-        const isMe = user.id === currentUserId;
-        const timeScore = Math.max(0, 1000 - (user.totalTimeTaken / 1000));
-        const finalScore = user.points * 1000 + timeScore;
-        return (
-          <div key={user.id}
-            className={`rounded-xl border-2 px-4 py-3 flex items-center gap-4 transition-all
-              ${isMe 
-                ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-300' 
-                : idx < 3
-                  ? 'border-blue-200 bg-white shadow-sm'
-                  : 'border-blue-200 bg-white hover:shadow-sm'
-              }`}
-          >
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full shrink-0 font-bold text-lg
-              ${idx === 0 ? 'bg-blue-700 text-white shadow-lg' :
-                idx === 1 ? 'bg-blue-600 text-white shadow-md' :
-                idx === 2 ? 'bg-blue-500 text-white shadow-md' :
-                'bg-blue-100 text-blue-800'
-              }`}>
-              #{idx + 1}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-semibold text-black truncate flex items-center gap-2">
-                {user.name} 
-                {isMe && <Badge variant="default" className="text-xs bg-blue-600">You</Badge>}
-              </div>
-              <div className="flex gap-4 text-xs text-blue-800 mt-1.5">
-                <span className="flex items-center gap-1">
-                  <span className="font-medium">Points:</span> 
-                  <span className="font-bold text-black">{user.points}</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="font-medium">Time: {formatTime(user.totalTimeTaken)}</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span>Correct: {user.correctAnswers}/{user.totalAnswered}</span>
-                </span>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-xs text-blue-700 mb-0.5">Final Score</div>
-              <div className="font-bold text-lg text-black tabular-nums">
-                {finalScore.toFixed(0)}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-      {final && (
-        <Button variant="outline" className="w-full mt-4 border-blue-300 hover:bg-blue-50 text-blue-700" onClick={downloadCSV}>
-          Download Results (CSV)
-        </Button>
-      )}
-    </div>
-  );
-};
