@@ -267,6 +267,10 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     socketRef.current?.emit('watchRoom', { roomId });
   }, []);
 
+  const refreshQuizState = useCallback((roomId: string) => {
+    socketRef.current?.emit('getQuizState', { roomId });
+  }, []);
+
   const scheduleQuiz = useCallback((roomId: string, startTime: number) => {
     socketRef.current?.emit('scheduleQuiz', { roomId, scheduledStartTime: startTime });
   }, []);
