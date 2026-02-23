@@ -101,6 +101,11 @@ export class QuizManager {
     return this.quizzes.get(roomId)?.getCurrentState() ?? null;
   }
 
+  /** Expose the raw Quiz instance for admin operations like leaderboard broadcast */
+  getQuizInstance(roomId: string): Quiz | null {
+    return this.quizzes.get(roomId) ?? null;
+  }
+
   getAllQuizSummaries(): QuizSummary[] {
     return Array.from(this.quizzes.values()).map((q) => q.getSummary());
   }

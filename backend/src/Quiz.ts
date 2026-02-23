@@ -32,6 +32,8 @@ export class Quiz {
 
   // Track per-user join time so they get full question duration
   private userJoinTimes: Map<string, number> = new Map();
+  // Track users who explicitly skipped the current per_question question
+  private skippedUserIds: Set<string> = new Set();
 
   constructor(roomId: string, config: QuizConfig) {
     this.roomId = roomId;
@@ -171,8 +173,7 @@ export class Quiz {
     const nextIdx = this.activeQuestionIndex + 1;
     if (nextIdx < this.problems.length) {
       this.activeQuestionIndex = nextIdx;
-      // Clear per-user join times for the new question (everyone gets full time again on next Q)
-      this.userJoinTimes.clear();
+      this.userJoinTimes.clear(); // activateCurrentQuestion clears skippedUserIds
       this.activateCurrentQuestion(Date.now());
     } else {
       this.endQuiz();
@@ -184,7 +185,10 @@ export class Quiz {
     const problem = this.problems[this.activeQuestionIndex];
     problem.startTime = now;
     problem.submissions = [];
+    this.skippedUserIds.clear();
     this.broadcastCurrentState();
+    // Push updated leaderboard to admin at the start of each question
+    this.broadcastAdminLeaderboard();
 
     const duration = this.config.durationPerQuestion ?? 30;
     this.questionTimer = setTimeout(() => {
@@ -210,12 +214,11 @@ export class Quiz {
     const user = this.users.find((u) => u.id === userId);
     if (!user) return false;
 
-    // Prevent double submit for this question
-    if (problem.submissions.some((s) => s.userId === userId)) return false;
+    // Prevent double submit / skip for this question
+    if (problem.submissions.some((s) => s.userId === userId) || this.skippedUserIds.has(userId)) return false;
 
     if (optionSelected !== null) {
       const now = Date.now();
-      // Use per-user join time if available (so time is measured from when user joined, not question start)
       const userEffectiveStart = this.userJoinTimes.get(userId) ?? problem.startTime;
       const timeTaken = now - userEffectiveStart;
       const isCorrect = problem.answer === optionSelected;
@@ -223,12 +226,20 @@ export class Quiz {
       user.totalAnswered++;
       user.totalTimeTaken += timeTaken;
       if (isCorrect) { user.correctAnswers++; user.points += problem.score; }
+    } else {
+      // Explicit skip — track without recording a submission entry
+      this.skippedUserIds.add(userId);
     }
 
-    // Advance for this user — since all users share the same question stream,
-    // advance the server question only once any user submits/skips
-    // (server is single-stream: everyone moves together)
-    this.advancePerQuestion();
+    // Broadcast live leaderboard to admin watchers after every submission
+    this.broadcastAdminLeaderboard();
+
+    // Auto-advance early if EVERY registered user has now submitted or skipped
+    const respondedCount = problem.submissions.length + this.skippedUserIds.size;
+    if (this.users.length > 0 && respondedCount >= this.users.length) {
+      this.advancePerQuestion();
+    }
+
     return true;
   }
 
@@ -273,6 +284,8 @@ export class Quiz {
     this.clearAllTimers();
     this.status = 'ended';
     this.broadcastCurrentState();
+    // Also push final leaderboard to admin watchers immediately
+    this.broadcastAdminLeaderboard();
   }
 
   // ─── Getters ──────────────────────────────────────────────────────────────
@@ -349,6 +362,21 @@ export class Quiz {
 
   private broadcastCurrentState(): void {
     IoManager.getIo().to(this.roomId).emit('stateUpdate', this.getCurrentState());
+  }
+
+  /** Emit live leaderboard to sockets watching this room from the admin panel */
+  broadcastAdminLeaderboard(): void {
+    const problem = this.status === 'question' ? this.problems[this.activeQuestionIndex] : null;
+    const respondedCount = problem
+      ? problem.submissions.length + this.skippedUserIds.size
+      : 0;
+    IoManager.getIo().to(`admin_watch_${this.roomId}`).emit('leaderboardUpdate', {
+      leaderboard: this.getLeaderboard(),
+      questionIndex: this.activeQuestionIndex,
+      totalQuestions: this.problems.length,
+      submissionsOnCurrentQuestion: respondedCount,
+      totalUsers: this.users.length,
+    });
   }
 
   private clearQuestionTimer(): void {

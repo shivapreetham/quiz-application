@@ -7,6 +7,7 @@ import type {
   QuizSummary,
   SocketQuizState,
   Problem,
+  User,
 } from '../types/types';
 
 export interface AdminContextType {
@@ -34,6 +35,11 @@ export interface AdminContextType {
   currentQuizConfig: QuizConfig | null;
   getUserSubmissions: (roomId: string, userId: string) => void;
   getAllSubmissionsForExport: (roomId: string) => void;
+
+  /** Live leaderboard pushed by server after every submission */
+  liveLeaderboard: User[];
+  /** Subscribe this admin socket to live leaderboard updates for a room */
+  watchRoom: (roomId: string) => void;
 }
 
 export interface SocketContextType {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -7,8 +7,9 @@ import { Label } from './ui/label';
 import { useSocket } from '../contexts/useSocket';
 
 export const Home = () => {
+  const [searchParams] = useSearchParams();
   const [userName, setUserName] = useState('');
-  const [roomId, setRoomId] = useState('');
+  const [roomId, setRoomId] = useState(() => searchParams.get('room') ?? '');
   const [error, setError] = useState('');
   const { joinRoom, isConnected } = useSocket();
   const navigate = useNavigate();

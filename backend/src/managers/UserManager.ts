@@ -131,13 +131,6 @@ export class UserManager {
         socket.emit('quizzesList', { quizzes: this.quizManager.getAllQuizSummaries() });
       });
     });
-    
-    socket.on('getUserSubmissions', (data: { roomId: string; userId: string }) => {
-      this.handle(socket, 'getUserSubmissions', () => {
-        const submissions = this.quizManager.getUserSubmissions(data.roomId, data.userId);
-        socket.emit('userSubmissions', { roomId: data.roomId, userId: data.userId, submissions });
-      });
-    });
 
     socket.on('scheduleQuiz', (data: ScheduleQuizPayload) => {
       this.handle(socket, 'scheduleQuiz', () => {
@@ -190,6 +183,14 @@ export class UserManager {
 
     // ── State queries ──
 
+    socket.on('watchRoom', (data: { roomId: string }) => {
+      this.handle(socket, 'watchRoom', () => {
+        socket.join(`admin_watch_${data.roomId}`);
+        const quiz = this.quizManager.getQuizInstance(data.roomId);
+        if (quiz) quiz.broadcastAdminLeaderboard();
+      });
+    });
+
     socket.on('getAllQuizzes', () => {
       this.handle(socket, 'getAllQuizzes', () => {
         socket.emit('quizzesList', { quizzes: this.quizManager.getAllQuizSummaries() });
@@ -198,8 +199,13 @@ export class UserManager {
 
     socket.on('getQuizState', (data: { roomId: string }) => {
       this.handle(socket, 'getQuizState', () => {
+        // Admin socket joins the admin watch room so it gets live leaderboard pushes
+        socket.join(`admin_watch_${data.roomId}`);
         const state = this.quizManager.getCurrentState(data.roomId);
         socket.emit('quizStateUpdate', state ?? { type: 'room_not_found' });
+        // Push current leaderboard immediately so admin sees it right away
+        const quiz = this.quizManager.getQuizInstance(data.roomId);
+        if (quiz) quiz.broadcastAdminLeaderboard();
       });
     });
 

@@ -7,6 +7,7 @@ import type {
   QuizConfig,
   QuizSummary,
   SocketQuizState,
+  User,
 } from '../types/types';
 import { SocketContext } from './SocketContextDef';
 
@@ -29,13 +30,17 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [currentQuizState, setCurrentQuizState] = useState<SocketQuizState | null>(null);
   const [currentQuizConfig, setCurrentQuizConfig] = useState<QuizConfig | null>(null);
+  const [liveLeaderboard, setLiveLeaderboard] = useState<User[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
   const selectedRoomIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(userId);
+  const watchedRoomRef = useRef<string | null>(null);
+  const isAuthenticatedRef = useRef(false);
 
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { selectedRoomIdRef.current = selectedRoomId; }, [selectedRoomId]);
+  useEffect(() => { isAuthenticatedRef.current = isAuthenticated; }, [isAuthenticated]);
 
   // ── Socket lifecycle ──────────────────────────────────────────────────────
 
@@ -44,7 +49,10 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: Infinity,
+      timeout: 10000,
+      // Try websocket first, fall back to polling
+      transports: ['websocket', 'polling'],
     });
 
     socketRef.current = s;
@@ -55,7 +63,13 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       setConnectionError(null);
       const savedRoom = localStorage.getItem('quiz_roomId');
       const savedName = localStorage.getItem('quiz_userName');
+      // Re-join quiz room if user was in one
       if (savedRoom && savedName) s.emit('join', { roomId: savedRoom, name: savedName });
+      // Re-authenticate admin and re-watch room if applicable
+      const watched = watchedRoomRef.current;
+      if (watched && isAuthenticatedRef.current) {
+        s.emit('watchRoom', { roomId: watched });
+      }
     });
 
     s.on('disconnect', () => {
@@ -122,6 +136,15 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     s.on('quizProblems',      updateProblems);
 
     s.on('quizStateUpdate', (state: SocketQuizState) => setCurrentQuizState(state));
+    s.on('leaderboardUpdate', (data: {
+      leaderboard: User[];
+      questionIndex: number;
+      totalQuestions: number;
+      submissionsOnCurrentQuestion: number;
+      totalUsers: number;
+    }) => {
+      setLiveLeaderboard(data.leaderboard);
+    });
     s.on('allSubmissionsForExport', (data: { submissions: any[]; problems: any[] }) => {
       // Store export data temporarily - components can access via callback
       (window as any).quizExportData = data;
@@ -186,6 +209,9 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     }
     socketRef.current?.emit('getQuizProblems', { roomId });
     socketRef.current?.emit('getQuizState', { roomId });
+    // Start watching live leaderboard updates for this room
+    watchedRoomRef.current = roomId;
+    socketRef.current?.emit('watchRoom', { roomId });
   }, [quizSummaries]);
 
   const createQuiz = useCallback((roomId: string, config: QuizConfig) => {
@@ -236,12 +262,13 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     socketRef.current?.emit('getAllSubmissionsForExport', { roomId });
   }, []);
 
-  const scheduleQuiz = useCallback((roomId: string, startTime: number) => {
-    socketRef.current?.emit('scheduleQuiz', { roomId, scheduledStartTime: startTime });
+  const watchRoom = useCallback((roomId: string) => {
+    watchedRoomRef.current = roomId;
+    socketRef.current?.emit('watchRoom', { roomId });
   }, []);
 
-  const refreshQuizState = useCallback((roomId: string) => {
-    socketRef.current?.emit('getQuizState', { roomId });
+  const scheduleQuiz = useCallback((roomId: string, startTime: number) => {
+    socketRef.current?.emit('scheduleQuiz', { roomId, scheduledStartTime: startTime });
   }, []);
 
   function clearUserStorage() {
@@ -283,6 +310,8 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           currentQuizConfig,
           getUserSubmissions,
           getAllSubmissionsForExport,
+          liveLeaderboard,
+          watchRoom,
         },
       }}
     >
