@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"c:\\\\Users\\\\SHIVAPREETHAM ROHITH\\\\Desktop\\\\webDev\\\\quiz-application\\\\Quizzer-MVI\")",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}

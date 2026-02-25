@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { toast } from 'sonner';
 import type {
   AllowedSubmissions,
   ProblemInput,
@@ -61,6 +62,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     s.on('connect', () => {
       setIsConnected(true);
       setConnectionError(null);
+      toast.success('Connected to server');
       const savedRoom = localStorage.getItem('quiz_roomId');
       const savedName = localStorage.getItem('quiz_userName');
       // Re-join quiz room if user was in one
@@ -75,9 +77,15 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     s.on('disconnect', () => {
       setIsConnected(false);
       setConnectionError('Connection lost. Reconnecting...');
+      toast.error('Connection lost. Attempting to reconnect...');
     });
 
-    s.on('connect_error', () => setConnectionError('Failed to connect to server'));
+    s.on('connect_error', (error) => {
+      const errorMsg = 'Failed to connect to server';
+      setConnectionError(errorMsg);
+      toast.error(errorMsg);
+      console.error('Connection error:', error);
+    });
 
     // ── User events ──
     s.on('init', (data: { userId: string | null; state: SocketQuizState }) => {
@@ -86,22 +94,39 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         userIdRef.current = data.userId;
         localStorage.setItem('quiz_userId', data.userId);
         setQuizState(data.state);
+        toast.success('Successfully joined the quiz room!');
       } else {
         setQuizState({ type: 'room_not_found' });
         clearUserStorage();
+        toast.error('Quiz room not found or is no longer accepting participants');
       }
     });
 
     s.on('stateUpdate', (state: SocketQuizState) => setQuizState(state));
-    s.on('submissionSuccess', () => {});
-    s.on('submissionFailed', (d: { message: string }) => console.warn('[submitAnswer] failed:', d.message));
-    s.on('bulkSubmitSuccess', () => {});
-    s.on('bulkSubmitFailed', (d: { message: string }) => console.warn('[bulkSubmit] failed:', d.message));
+    s.on('submissionSuccess', () => {
+      toast.success('Answer submitted successfully!');
+    });
+    s.on('submissionFailed', (d: { message: string }) => {
+      console.warn('[submitAnswer] failed:', d.message);
+      toast.error(d.message || 'Failed to submit answer');
+    });
+    s.on('bulkSubmitSuccess', () => {
+      toast.success('Quiz submitted successfully!');
+    });
+    s.on('bulkSubmitFailed', (d: { message: string }) => {
+      console.warn('[bulkSubmit] failed:', d.message);
+      toast.error(d.message || 'Failed to submit quiz');
+    });
 
     // ── Admin events ──
     s.on('adminAuth', (data: { success: boolean }) => {
       setIsAuthenticated(data.success);
-      if (data.success) s.emit('getAllQuizzes');
+      if (data.success) {
+        toast.success('Admin authentication successful!');
+        s.emit('getAllQuizzes');
+      } else {
+        toast.error('Invalid admin password');
+      }
     });
 
     s.on('quizzesList', (data: { quizzes: QuizSummary[] }) => {
@@ -115,9 +140,18 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     });
-    s.on('quizCreated',   () => s.emit('getAllQuizzes'));
-    s.on('quizStarted',   () => s.emit('getAllQuizzes'));
-    s.on('quizScheduled', () => s.emit('getAllQuizzes'));
+    s.on('quizCreated', () => {
+      toast.success('Quiz created successfully!');
+      s.emit('getAllQuizzes');
+    });
+    s.on('quizStarted', () => {
+      toast.success('Quiz started!');
+      s.emit('getAllQuizzes');
+    });
+    s.on('quizScheduled', () => {
+      toast.success('Quiz scheduled successfully!');
+      s.emit('getAllQuizzes');
+    });
 
     const updateProblems = (data: { problems?: Problem[]; roomId?: string }) => {
       // Handle both { problems } and { roomId, problem, problems } formats
@@ -151,6 +185,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     });
     s.on('error', (data: { event: string; message: string }) => {
       console.error('[server error]', data.event, data.message);
+      toast.error(`Error: ${data.message}`);
     });
 
     return () => { s.close(); };
